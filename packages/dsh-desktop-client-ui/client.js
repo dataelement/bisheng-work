@@ -455,10 +455,26 @@ window.__ModuleLoader__.load({
           active = true
           const poll = async () => { if (!document.hidden) await sync(); if (active) timer = setTimeout(poll, 1500) }
           const account = () => { historyRequest++; publish({ items: [], page: 0, historyPhase: 'idle' }); lastHistory = 0; void sync() }
-          const disposeNavigation = ctx.uiWorkspace.registerNavigationHandler((intent, workspaceId) => {
-            if (intent === 'new' && workspaceId === undefined && value.mode === 'chat') { void open('new'); return true }
-            select('work')
-          })
+          // Older workspace hosts omit this registration. Failing here used to skip
+          // the enterprise menu sync, so More never received knowledge and the other pages.
+          const hasNavigationHandler = typeof ctx.uiWorkspace.registerNavigationHandler === 'function'
+          const disposeNavigation = hasNavigationHandler
+            ? ctx.uiWorkspace.registerNavigationHandler((intent, workspaceId) => {
+              if (intent === 'new' && workspaceId === undefined && value.mode === 'chat') { void open('new'); return true }
+              select('work')
+            })
+            : () => {}
+          // This host never notifies session opens. A history click still replaces
+          // the work session, so reveal that column when chat is covering it.
+          const originalOpenSession = ctx.uiWorkspace.openSession
+          const revealWorkSession = hasNavigationHandler || typeof originalOpenSession !== 'function'
+            ? null
+            : function (target, source) {
+              const result = originalOpenSession.call(this, target, source)
+              if (typeof target === 'string' && value.mode === 'chat') select('work')
+              return result
+            }
+          if (revealWorkSession) ctx.uiWorkspace.openSession = revealWorkSession
           const settings = (event) => publish({ settingsOpen: event.detail?.open === true, ...(event.detail?.open ? {} : { settingsSurface: undefined }) })
           const approvals = (event) => publish({ approvalsOpen: event.detail?.open === true })
           // A sidebar account dialog is drawn by the renderer, so the native view yields the region.
@@ -505,6 +521,7 @@ window.__ModuleLoader__.load({
             active = false; revision++; historyRequest++; clearTimeout(timer); unsubscribe(); unsubscribeSessions(); unsubscribeWork(); unsubscribeChat?.()
             window.removeEventListener('dsh-desktop:enterprise-account-changed', account)
             disposeNavigation()
+            if (revealWorkSession && ctx.uiWorkspace.openSession === revealWorkSession) ctx.uiWorkspace.openSession = originalOpenSession
             window.removeEventListener('dsh-desktop:settings-visibility', settings)
             window.removeEventListener('dsh-desktop:approvals-visibility', approvals)
             window.removeEventListener('dsh-desktop:account-dialog-visibility', accountDialog)
