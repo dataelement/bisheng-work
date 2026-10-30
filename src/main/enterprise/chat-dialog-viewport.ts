@@ -1,19 +1,13 @@
-import type { EnterprisePalette } from '../../shared/enterprise-chat-view'
-
 interface ContentBounds { x: number; y: number; width: number; height: number }
 
 /** The app keeps its chat-region geometry while body portals use the full native window. */
-export function chatDialogViewportScript(bounds: ContentBounds | undefined, mask?: EnterprisePalette['mask']): string {
+export function chatDialogViewportScript(bounds: ContentBounds | undefined): string {
   const css = bounds ? `
     html[data-dsh-window-dialog] { --dsh-chat-viewport-width: ${bounds.width}px; --dsh-chat-viewport-height: ${bounds.height}px; }
     html[data-dsh-window-dialog], html[data-dsh-window-dialog] body { background: transparent !important; }
     html[data-dsh-window-dialog] #root {
       position: fixed; left: ${bounds.x}px; top: ${bounds.y}px;
       width: ${bounds.width}px; height: ${bounds.height}px; overflow: hidden;
-    }
-    html[data-dsh-window-dialog] .dsh-knowledge-overlay {
-      background: ${mask ? `rgba(${mask.join(',')})` : 'rgba(0,0,0,.24)'};
-      animation: none;
     }
   ` : ''
   return `(() => {

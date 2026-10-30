@@ -1,3 +1,11 @@
+## 2026-10-30 — 桌面弹窗保留背景原色
+
+- 用户确认取消视觉蒙版、保留弹窗。Client 共用弹窗壳负责透明背景；Desktop 窗口视图只管理弹窗范围与背景内容坐标，移除知识空间独立蒙版颜色及动画覆盖。
+- 基线 `bisheng-desktop:V1.2.0@e928c8c3bd5d2f188f17b7d93e0fbd7bc13eaf90`，Harness `0.2.1-rc.2`；独立目录 `.worktrees/bisheng-work-v120-dialog-transparent`，分支 `codex/v120-dialog-transparent`。
+- 相关 3 组 45 项回归、类型检查、生产构建通过；macOS Electron 原生隔离夹具 12 组通过，覆盖宽度、缩放、主题、嵌套弹窗、透明背景、外部点击、Esc 与关闭恢复。新增 viewport 行为用例覆盖透明背景及样式清理。
+- 干净依赖安装及 postinstall 通过；完整回归 3,179 项通过、5 项条件跳过，1 项企业服务用例等待超时；该测试与弹窗相关用例串行复测 4 组 73 项全部通过。新增 viewport 回归在原基线失败，恢复修复后通过。
+- [Client 配套 PR #2566](https://github.com/dataelement/bisheng/pull/2566)，基线 `feat/bisheng-work-120-main@1954f60c4`。两端部署、Windows 安装客户端及真实账号技能上传验收待执行。
+
 ## 2026-10-29 — macOS 安全模式插件管理页完整展示
 
 - 根因：安全模式管理页位于宿主 iframe，Chat 位于独立原生子视图；管理页打开后原生 Chat 继续显示，覆盖正文并遮住部分标题。

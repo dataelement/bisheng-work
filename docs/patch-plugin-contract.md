@@ -34,7 +34,7 @@ Harness 0.2.0-rc.2 的 `dsh-client-ui-input-trigger` 将 pointer hover 与 keybo
 
 ### 嵌入页面的窗口级模态展示（2026-10-28）
 
-页面 body portal 的模态状态由 presentation preload 汇总，经当前账号、主 frame、origin 与 pathname 校验传给 `EnterpriseChatView`。弹窗期间子视图覆盖窗口，`#root` 保留内容区坐标，透明背景让原生侧栏透出相同蒙版。关闭最后一个 portal 后恢复内容区；多层弹窗及退场动画共用该生命周期。设置内容页继续采用宿主设置容器范围。
+页面 body portal 的模态状态由 presentation preload 汇总，经当前账号、主 frame、origin 与 pathname 校验传给 `EnterpriseChatView`。弹窗期间子视图覆盖窗口，`#root` 保留内容区坐标，透明背景保留原生侧栏与页面原色，网页弹窗组件统一决定展示样式。关闭最后一个 portal 后恢复内容区；多层弹窗及退场动画共用该生命周期。设置内容页继续采用宿主设置容器范围。
 
 这是原生窗口展示接缝：Harness slot 位于另一个 renderer。preload 只观察 portal 与 root 的背景隔离属性，按动画帧汇总变化；隐藏时暂停，卸载时释放。语义为普通浮层的 popover 保持原范围。知识空间旧展示入口触发同一个汇总状态刷新。验证入口为 `test/enterprise-modal.test.mjs`、`test/enterprise-chat-view.test.ts` 和跨平台 `scripts/verify-enterprise-modal.mjs`。
 

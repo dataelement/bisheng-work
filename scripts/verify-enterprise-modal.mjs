@@ -15,14 +15,14 @@ await mkdir(output, { recursive: true })
 const html = `<!doctype html><html><head><style>
 *{box-sizing:border-box}body{margin:0;background:#fff;color:#222;font:15px sans-serif}
 #root{height:100vh;background:#fff;padding:30px}button{padding:8px 20px;margin:8px}
-.mask{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100}
+.mask{position:fixed;inset:0;background:transparent;z-index:100}
 [role=dialog],[role=alertdialog]{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(560px,90vw);background:white;padding:24px;border-radius:12px;z-index:101;box-shadow:0 5px 18px #0003}
 </style></head><body><main id="root"><h2>Tools and skills · local fixture</h2><button id="upload">Upload skill</button><p>The page keeps its original content bounds.</p></main><script>
 window.maskClicks=0;window.pageClicks=0;
 document.querySelector('#upload').onclick=()=>openModal();
 document.querySelector('#root').onclick=()=>window.pageClicks++;
 window.openModal=(nested=false)=>{const portal=document.createElement('section');portal.className='portal';
-portal.innerHTML='<div class="mask"></div><div role="'+(nested?'alertdialog':'dialog')+'" aria-modal="true" data-state="open"><h3>'+(nested?'Confirm action':'Upload skill')+'</h3><p>Local presentation fixture</p><button class="close">Cancel</button><button class="nested">Confirm</button></div>';
+portal.innerHTML='<div class="mask dsh-knowledge-overlay"></div><div role="'+(nested?'alertdialog':'dialog')+'" aria-modal="true" data-state="open"><h3>'+(nested?'Confirm action':'Upload skill')+'</h3><p>Local presentation fixture</p><button class="close">Cancel</button><button class="nested">Confirm</button></div>';
 document.body.append(portal);portal.querySelector('.close').onclick=()=>portal.remove();portal.querySelector('.nested').onclick=()=>openModal(true);
 portal.querySelector('.mask').onclick=()=>{window.maskClicks++;portal.remove()};portal.querySelector('.close').focus()};
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelector('.portal:last-child')?.remove()});
@@ -76,7 +76,8 @@ try {
           close(geometry.root.width,JSON.parse(before).width);close(geometry.root.height,JSON.parse(before).height)
           close(geometry.mask.width*zoom,width);close(geometry.mask.height*zoom,height)
           close((geometry.dialog.x+geometry.dialog.width/2)*zoom,width/2)
-          assert.equal(geometry.hit,'mask')
+          assert.equal(geometry.hit,'mask dsh-knowledge-overlay')
+          assert.equal(await wc.executeJavaScript('getComputedStyle(document.querySelector(".mask")).backgroundColor'), 'rgba(0, 0, 0, 0)')
           await wc.executeJavaScript('openModal(true)')
           await wc.executeJavaScript('document.querySelector(".portal:last-child").remove()')
           await pause();assert.equal(view.getBounds().x,0)

@@ -274,7 +274,7 @@ export class EnterpriseChatView {
     const viewZoom = this.view.webContents.getZoomFactor()
     const viewportScript = chatDialogViewportScript(windowDialog ? {
       x: x / viewZoom, y: y / viewZoom, width: contentBounds.width / viewZoom, height: contentBounds.height / viewZoom
-    } : undefined, this.presentation.palette?.mask)
+    } : undefined)
     if (this.state.phase === 'ready' && viewportScript !== this.dialogViewport) {
       this.dialogViewport = viewportScript
       void this.view.webContents.executeJavaScript(viewportScript).catch(() => {
