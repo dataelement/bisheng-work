@@ -3,11 +3,23 @@ import { readFile } from 'node:fs/promises'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createPortal } from 'react-dom'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 let root, container
 const disposers = []
+beforeEach(() => {
+  // jsdom supplies DOM state; the Electron fixture verifies native visibility/layout.
+  const original = Element.prototype.checkVisibility
+  Element.prototype.checkVisibility = function () {
+    return !this.closest('[hidden], [style="display: none;"], [style="visibility: hidden;"]')
+  }
+  disposers.push(() => {
+    if (original) Element.prototype.checkVisibility = original
+    else delete Element.prototype.checkVisibility
+    document.querySelectorAll('[data-host-dialog-fixture]').forEach(element => element.remove())
+  })
+})
 afterEach(async () => {
   if (root) await act(async () => root.unmount())
   container?.remove()
@@ -62,7 +74,7 @@ async function mount(connected = false, collection = {}, inert = false, workbenc
       throw new Error(name)
     })
   } }
-  new Function(await readFile('packages/dsh-desktop-client-ui/client.js', 'utf8'))()
+  new Function(await readFile(process.env.DSH_TEST_HOST_DIALOG_CLIENT_SOURCE || 'packages/dsh-desktop-client-ui/client.js', 'utf8'))()
   plugin.apply({
     inject(names, callback) {
       if (names.includes('desktopWorkbenches')) {
@@ -652,4 +664,78 @@ it.each([false, true])('gives About the foreground including initial state=%s', 
   present.mockClear()
   await act(async () => document.documentElement.setAttribute('data-dsh-about-open', ''))
   expect(present).toHaveBeenCalledTimes(0)
+})
+
+
+function hostDialog(markup = '<div role="dialog" aria-modal="true"><button>Cancel</button></div>') {
+  const portal = document.createElement('section')
+  portal.dataset.hostDialogFixture = 'true'
+  portal.innerHTML = markup
+  document.body.append(portal)
+  return portal
+}
+
+it('yields native Chat to an existing host dialog and restores the same conversation after dismissal', async () => {
+  const dialog = hostDialog()
+  const view = await mount(true)
+  await view.click('chat')
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }))
+  await act(async () => dialog.remove())
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }))
+  expect(container.querySelector('[aria-label="work draft"]').value).toBe('retained draft')
+})
+
+it('keeps native Chat behind nested host confirmations until their final removal', async () => {
+  const view = await mount(true)
+  await view.click('chat')
+  let first, second
+  await act(async () => { first = hostDialog() })
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }))
+  await act(async () => { second = hostDialog('<div role="alertdialog" aria-modal="true">Confirm</div>'); first.remove() })
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }))
+  await act(async () => second.remove())
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }))
+})
+
+it('tracks modal visibility and semantics within surviving portal containers', async () => {
+  const view = await mount(true)
+  await view.click('chat')
+  let portal
+  await act(async () => { portal = hostDialog('<div role="dialog" aria-modal="true" hidden>Confirm</div><div role="menu">Menu</div><div role="dialog" aria-modal="false">Popover</div>') })
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }))
+  await act(async () => { portal.firstElementChild.hidden = false })
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }))
+  await act(async () => { portal.firstElementChild.style.visibility = 'hidden' })
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }))
+  await act(async () => { portal.firstElementChild.style.visibility = '' })
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }))
+  await act(async () => { portal.firstElementChild.setAttribute('aria-modal', 'false') })
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }))
+})
+
+it('keeps Work selected when its confirmation closes and releases modal observers on unmount', async () => {
+  const view = await mount(true)
+  await view.click('chat')
+  let portal
+  await act(async () => { portal = hostDialog() })
+  await view.click('work')
+  await act(async () => portal.remove())
+  expect(window.dshEnterpriseChat.present).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }))
+  await act(async () => root.unmount())
+  root = undefined
+  window.dshEnterpriseChat.present.mockClear()
+  await act(async () => { hostDialog() })
+  expect(window.dshEnterpriseChat.present).toHaveBeenCalledTimes(0)
+})
+
+it('keeps native presentation stable while conversation content streams inside the app root', async () => {
+  const view = await mount(true)
+  await view.click('chat')
+  window.dshEnterpriseChat.present.mockClear()
+  await act(async () => {
+    const stream = document.createElement('div')
+    container.querySelector('[aria-label="work draft"]').parentElement.append(stream)
+    for (let i = 0; i < 100; i++) stream.append(document.createTextNode('token '))
+  })
+  expect(window.dshEnterpriseChat.present).toHaveBeenCalledTimes(0)
 })

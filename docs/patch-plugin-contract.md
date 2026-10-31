@@ -357,3 +357,20 @@ The preload exposes `dshDesktopNotifications.completed` and `onClicked` using co
 Notification audit records go to the existing `harness.log` with `[desktop-notification]`: rejected, foreground, unsupported, requested, shown, failed and clicked. `shown` records Electron's callback; Windows visual acceptance remains a separate gate. Failures retain bounded system error detail with URL and credential-value redaction. Audit facts contain session identifiers and completion metadata only.
 
 Regression coverage: `test/work-completion-notifications.test.mjs` exercises the installed projection registry and a real AgentLoop with a fixture model transport; `test/desktop-notification.test.ts` covers the native policy and toast lifecycle at the Electron API boundary. `node scripts/verify-work-notifications.mjs` launches an isolated real Electron window with context isolation and sandbox enabled, exercises the actual preload/main IPC, icon decoding, file audit and click/session routing, and replaces only the OS toast object. Windows installed-package NOTICE-001/002/003 testing covers native sender identity, icon, visible toast, focus and restoration.
+
+### Host confirmation dialogs and native Chat (2026-10-31)
+
+The desktop content owner observes visible modal semantics in host body portals.
+Harness Modal owns dialog content, locale, focus and dismissal; DesktopModes owns
+native Chat presentation. A visible modal makes the existing present channel hide
+the WebContentsView. The final dismissal recomputes presentation from the current
+mode and surface state, preserving conversation and Work state.
+
+The observer reads existing portals on mount, tracks their visibility and modal
+attributes, and releases all subscriptions on unmount. It observes portal subtrees
+and body child changes; streaming conversation mutations inside the app root remain
+outside this subscription. Root inert and the About shadow-DOM signal keep their
+existing ownership. Source changes stay in the host plugin and use the established
+IPC. Run `node scripts/verify-host-dialog.mjs` for the real Harness components,
+styles and Electron WebContentsView fixture; session deletion uses a fixture service.
+Windows installed-package and real-account acceptance remain separate checks.

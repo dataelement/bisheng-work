@@ -570,6 +570,49 @@ window.__ModuleLoader__.load({
       if (elapsed >= 0 && elapsed < 60000) return t('justNow')
       return new Date(time).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })
     }
+    /** Host body portals own modal input; native content yields until the last one closes. */
+    function observeHostDialogs(report) {
+      const selector = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"], dialog[open]'
+      const portals = new Map()
+      let previous = false
+      let initialized = false
+      let disposed = false
+      const refresh = () => {
+        if (disposed || document.hidden) return
+        const children = new Set([...document.body.children].filter(element => element.id !== 'root' && !element.matches('script, style, link')))
+        for (const [element, observer] of portals) {
+          if (children.has(element)) continue
+          observer.disconnect()
+          portals.delete(element)
+        }
+        for (const element of children) {
+          if (portals.has(element)) continue
+          const observer = new MutationObserver(refresh)
+          observer.observe(element, { childList: true, subtree: true, attributes: true, attributeFilter: ['role', 'aria-modal', 'open', 'hidden', 'style', 'class'] })
+          portals.set(element, observer)
+        }
+        const open = [...children].some(element => {
+          const dialogs = [...(element.matches(selector) ? [element] : []), ...element.querySelectorAll(selector)]
+          return dialogs.some(dialog => dialog.checkVisibility({ checkVisibilityCSS: true }) &&
+            (dialog.getAttribute('aria-modal') === 'true' || dialog.matches(':modal')))
+        })
+        if (open === previous) return
+        previous = open
+        if (initialized) report(open)
+      }
+      const body = new MutationObserver(refresh)
+      body.observe(document.body, { childList: true })
+      document.addEventListener('visibilitychange', refresh)
+      refresh()
+      initialized = true
+      return { isOpen: () => previous, dispose: () => {
+        disposed = true
+        body.disconnect()
+        for (const observer of portals.values()) observer.disconnect()
+        portals.clear()
+        document.removeEventListener('visibilitychange', refresh)
+      } }
+    }
     function DesktopModes({ work, columns, resizeHandle, navigation, t, locale }) {
       const state = React.useSyncExternalStore(navigation.subscribe, navigation.snapshot)
       const { mode, settingsOpen, settingsSurface } = state
@@ -582,6 +625,7 @@ window.__ModuleLoader__.load({
         if (!bridge) return
         const appRoot = document.getElementById('root')
         let observedLeading
+        let dialogOpen = false
         const present = () => {
           const rect = panel.current?.getBoundingClientRect()
           if (!rect) return
@@ -603,7 +647,7 @@ window.__ModuleLoader__.load({
           const surfaceOpen = settingsOpen || state.approvalsOpen || state.accountDialogOpen
           const remote = surfaceOpen && state.settingsProtocolVersion === 1 && settingsSurface
 const safeModePageOpen = document.documentElement.hasAttribute('data-dsh-safe-mode-page')
-const hostModalOpen = appRoot?.inert || document.documentElement.hasAttribute('data-dsh-about-open')
+const hostModalOpen = dialogOpen || appRoot?.inert || document.documentElement.hasAttribute('data-dsh-about-open')
 const palette = hostPalette()
 void bridge.present({ visible: hostModalOpen ? false : (remote ? state.connected && remote.bounds.width > 0 && remote.bounds.height > 0 : mode === 'chat' && !surfaceOpen && !safeModePageOpen), ...(remote ? { settings: remote.section } : {}), ...(palette ? { palette } : {}), bounds: remote ? remote.bounds : { x, y, width: Math.max(0, rect.right - x), height: Math.max(0, rect.y + rect.height - y) }, theme: document.body.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light', locale: locale.getSnapshot().active === 'zh' ? 'zh' : 'en' }).catch(() => {})
         }
@@ -624,11 +668,13 @@ interaction.observe(document.documentElement, { attributes: true, attributeFilte
         if (frame) chromeLayout.observe(frame, { childList: true, attributes: true, attributeFilter: ['data-sidebar-collapsed'] })
         const theme = new MutationObserver(present)
         theme.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+        const dialogs = observeHostDialogs(open => { dialogOpen = open; present() })
+        dialogOpen = dialogs.isOpen()
         const unsubscribeLocale = locale.subscribe(present)
         window.addEventListener('resize', present)
         present()
         return () => {
-          interaction.disconnect(); resize.disconnect(); chromeLayout.disconnect(); theme.disconnect(); unsubscribeLocale(); window.removeEventListener('resize', present)
+          dialogs.dispose(); interaction.disconnect(); resize.disconnect(); chromeLayout.disconnect(); theme.disconnect(); unsubscribeLocale(); window.removeEventListener('resize', present)
         }
       }, [mode, settingsOpen, state.approvalsOpen, state.accountDialogOpen, settingsSurface, state.connected, state.settingsProtocolVersion, locale])
       React.useEffect(() => () => {

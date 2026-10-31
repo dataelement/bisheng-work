@@ -14,6 +14,7 @@ export default defineConfig({
       'test/windows-*.test.{ts,js,mjs}',
       'test/about-presentation.test.ts',
       'test/desktop-modes-ui.test.mjs',
+      'test/session-delete-locale.test.mjs',
       'test/enterprise-chat-view.test.ts',
       'test/generation-*.test.{ts,js,mjs}',
       'test/profile-*.test.{ts,js,mjs}',
