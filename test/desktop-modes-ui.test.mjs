@@ -107,10 +107,11 @@ async function mount(connected = false, collection = {}, inert = false, workbenc
     async navigation(entries, path = '/skills') { snapshot = { ...snapshot, navigation: { entries, homeLabel: 'Welcome' }, path, conversationId: undefined }; await act(async () => chatListener(snapshot)) },
     navigate: (...args) => navigate(...args),
     async click(mode) { await act(async () => container.querySelector(`#dsh-mode-${mode}`).click()) },
-    async account(next) {
-      snapshot = { connected: next, phase: 'ready', epoch: 1, conversationId: 'new', settingsProtocolVersion: 1 }
+    async account(next, epoch = 1) {
+      snapshot = { connected: next, phase: 'ready', epoch, conversationId: 'new', settingsProtocolVersion: 1 }
       await act(async () => window.dispatchEvent(new CustomEvent('dsh-desktop:enterprise-account-changed')))
     },
+    async pushState(patch) { snapshot = { ...snapshot, ...patch }; await act(async () => chatListener(snapshot)) },
     selected: () => container.querySelector('#dsh-panel-chat').hidden ? 'work' : 'chat',
     picker: () => container.querySelector('[role=tablist]'),
     async panel(id) { await act(async () => setPanel(id)) },
@@ -652,4 +653,116 @@ it.each([false, true])('gives About the foreground including initial state=%s', 
   present.mockClear()
   await act(async () => document.documentElement.setAttribute('data-dsh-about-open', ''))
   expect(present).toHaveBeenCalledTimes(0)
+})
+
+function deferredHistory() {
+  let resolve, reject
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+const cloudRows = () => [...container.querySelectorAll('[data-history-kind=chat]')]
+const historyResult = (items, epoch = 1, hasMore = false) => ({ epoch, items, hasMore })
+const historyItem = (id, title = id) => ({ id, title, updatedAt: '2026-10-18' })
+
+it('keeps cached rows and scroll position during same-account refresh, then replaces the list', async () => {
+  const ui = await mount(true)
+  const row = cloudRows()[0]
+  const scroll = container.querySelector('.dshRecentHistory')
+  scroll.scrollTop = 48
+  const pending = deferredHistory()
+  window.dshEnterpriseChat.history.mockReturnValueOnce(pending.promise)
+  await ui.account(true)
+  expect(cloudRows()[0]).toBe(row)
+  expect(scroll.scrollTop).toBe(48)
+  expect(scroll.textContent).not.toContain('historyLoading')
+  await act(async () => pending.resolve(historyResult([historyItem('cloud-a', 'Renamed chat'), historyItem('cloud-b')])))
+  expect(cloudRows().map(item => item.title)).toEqual(['Renamed chat', 'cloud-b'])
+  expect(cloudRows()[0]).toBe(row)
+})
+
+it('keeps cached rows on refresh failure and replaces them with a successful empty response', async () => {
+  const ui = await mount(true)
+  const row = cloudRows()[0]
+  window.dshEnterpriseChat.history.mockRejectedValueOnce(new Error('offline'))
+  await ui.account(true)
+  expect(cloudRows()[0]).toBe(row)
+  const retry = [...container.querySelectorAll('button')].find(button => button.textContent === 'historyError')
+  expect(retry).toBeDefined()
+  window.dshEnterpriseChat.history.mockResolvedValueOnce(historyResult([]))
+  await act(async () => retry.click())
+  expect(cloudRows()).toHaveLength(0)
+  expect(container.querySelector('[data-local-row]')).not.toBeNull()
+})
+
+it('keeps the last list while an account-state read fails', async () => {
+  const ui = await mount(true)
+  const row = cloudRows()[0]
+  window.dshEnterpriseChat.state.mockRejectedValueOnce(new Error('state unavailable'))
+  await ui.account(true)
+  expect(cloudRows()[0]).toBe(row)
+})
+
+it('coalesces repeated account refresh notifications while history is pending', async () => {
+  const ui = await mount(true)
+  const pending = deferredHistory()
+  window.dshEnterpriseChat.history.mockClear().mockReturnValue(pending.promise)
+  await ui.account(true)
+  await ui.account(true)
+  await ui.account(true)
+  expect(window.dshEnterpriseChat.history).toHaveBeenCalledTimes(1)
+  expect(cloudRows()).toHaveLength(1)
+  await act(async () => pending.resolve(historyResult([historyItem('fresh')])))
+  expect(cloudRows()[0].title).toBe('fresh')
+})
+
+it.each(['poll', 'push'])('clears account-owned history on %s identity changes and rejects old responses', async source => {
+  const ui = await mount(true)
+  const oldRequest = deferredHistory(), newRequest = deferredHistory()
+  window.dshEnterpriseChat.history.mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise)
+  await ui.account(true)
+  if (source === 'poll') await ui.account(true, 2)
+  else await ui.pushState({ connected: true, epoch: 2 })
+  expect(cloudRows()).toHaveLength(0)
+  await act(async () => oldRequest.resolve(historyResult([historyItem('old-account')], 1)))
+  expect(cloudRows()).toHaveLength(0)
+  await act(async () => newRequest.resolve(historyResult([historyItem('new-account')], 2)))
+  expect(cloudRows().map(row => row.title)).toEqual(['new-account'])
+})
+
+it('clears cloud rows immediately on pushed logout and keeps local work rows', async () => {
+  const ui = await mount(true)
+  await ui.pushState({ connected: false, epoch: 2 })
+  expect(cloudRows()).toHaveLength(0)
+  expect(container.querySelector('[data-local-row]')).not.toBeNull()
+})
+
+it('keeps loaded pages visible until the entire refresh has completed', async () => {
+  const ui = await mount(true)
+  const firstPage = Array.from({ length: 40 }, (_, i) => historyItem(`page-1-${i}`))
+  window.dshEnterpriseChat.history.mockResolvedValueOnce(historyResult(firstPage, 1, true))
+  await ui.account(true)
+  window.dshEnterpriseChat.history.mockResolvedValueOnce(historyResult([historyItem('page-2')]))
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'more').click())
+  const secondPage = deferredHistory()
+  window.dshEnterpriseChat.history.mockResolvedValueOnce(historyResult(firstPage.map(item => ({ ...item, title: 'updated' })), 1, true)).mockReturnValueOnce(secondPage.promise)
+  await ui.account(true)
+  expect(cloudRows()).toHaveLength(41)
+  expect(cloudRows().some(row => row.title === 'updated')).toBe(false)
+  await act(async () => secondPage.resolve(historyResult([historyItem('page-2-new')])))
+  expect(cloudRows()).toHaveLength(41)
+  expect(cloudRows().some(row => row.title === 'page-2-new')).toBe(true)
+})
+
+
+it('keeps a confirmed empty state visible while refreshing an empty history', async () => {
+  const ui = await mount(true, { items: [] })
+  window.dshEnterpriseChat.history.mockResolvedValueOnce(historyResult([]))
+  await ui.account(true)
+  const history = container.querySelector('.dshRecentHistory')
+  expect(history.textContent).toBe('recentrecentEmpty')
+  const pending = deferredHistory()
+  window.dshEnterpriseChat.history.mockReturnValueOnce(pending.promise)
+  await ui.account(true)
+  expect(history.textContent).toBe('recentrecentEmpty')
+  await act(async () => pending.resolve(historyResult([])))
 })
