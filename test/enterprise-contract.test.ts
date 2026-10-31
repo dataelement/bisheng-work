@@ -124,6 +124,7 @@ describe('BiSheng compatible client API mock', () => {
       '/api/enterprise.login.manual',
       '/api/enterprise.deep-link.inspect',
       '/api/enterprise.deep-link.confirm',
+      '/api/enterprise.models.refresh',
       '/api/enterprise.refresh',
       '/api/enterprise.logout'
     ])

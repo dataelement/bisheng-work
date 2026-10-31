@@ -1,3 +1,4 @@
+// Coverage AC: AC-03, AC-30, AC-31, AC-56.
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -67,6 +68,14 @@ async function plugin(service: EnterpriseService, services: Record<string, unkno
   applyEnterprise({
     ...services,
     provide() {},
+    on(name: string, ...args: unknown[]) {
+      // Only global audit-title events are delivered by this fixture; the
+      // real locale request/inbox lifecycle is exercised in the locale tests.
+      const options = args[1] as { global?: boolean } | undefined
+      if (name !== 'session/event' || options?.global !== true) return () => undefined
+      const subscribe = services.on
+      return typeof subscribe === 'function' ? subscribe(name, ...args) : () => undefined
+    },
     connection: { fetch: { register: (route: Route) => { routes.push(route); return () => undefined } } },
     llm: { registerAdapter: (_providers: string[], value: Adapter) => {
       adapter = value

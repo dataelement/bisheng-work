@@ -1,8 +1,58 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
-index 4bfdd13..1c897fe 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
-@@ -15879,8 +15879,17 @@ window.__ModuleLoader__.load({
+@@ -4338,7 +4338,9 @@
+ 			appearance: zod.z.enum([
+ 				"session",
+ 				"file",
+-				"folder"
++				"folder",
++				"skill",
++				"tool"
+ 			]).optional(),
+ 			clipboardText: zod.z.string(),
+ 			invalid: zod.z.boolean().optional()
+@@ -15519,7 +15521,7 @@
+ 						cursor = part.offset + part.length;
+ 					}
+ 					out += draft.slice(cursor);
+-					this.settleSink(attempt, this.deps.defaultSink(out.trim(), attachmentIds, mode, attempt.signal));
++					this.settleSink(attempt, this.deps.defaultSink(out.trim(), attachmentIds, mode, attempt.signal, occurrences));
+ 				}, (error) => {
+ 					if (this.dead(attempt)) return;
+ 					const message = error instanceof Error ? error.message : String(error);
+@@ -15638,7 +15640,11 @@
+ 			*/
+ 			beginSubmit(attempt, claim, args) {
+ 				const attachmentIds = claim.attachments === true ? [...this.attachmentIds] : [];
++				const references = this.projection.occurrences;
+ 				Promise.resolve().then(async () => {
++					attempt.signal.throwIfAborted();
++					await this.deps.beforeCommandSubmit?.({ name: claim.name, args }, references, attempt.signal);
++					if (this.dead(attempt)) return void 0;
+ 					const attachments = attachmentIds.length > 0 ? await this.deps.commandAttachments.serialize(attachmentIds) : [];
+ 					if (this.dead(attempt)) return void 0;
+ 					return claim.submit(args, this.deps.actx, attachments);
+@@ -15783,7 +15789,17 @@
+ 					inputTriggers: () => this.controller(actx),
+ 					popup: () => this.popup(actx),
+ 					inbox: session.projections.faceOf("inbox"),
+-					defaultSink: (text, attachmentIds, mode, signal) => this.sink(session, text, attachmentIds, mode, signal),
++					defaultSink: async (text, attachmentIds, mode, signal, references = []) => {
++						signal.throwIfAborted();
++						await actx.serial(actx, "conversation/input-before-submit", { sessionId: session.sessionId, references, signal });
++						signal.throwIfAborted();
++						return this.sink(session, text, attachmentIds, mode, signal);
++					},
++					beforeCommandSubmit: async (command, references, signal) => {
++						signal.throwIfAborted();
++						await actx.serial(actx, "conversation/input-before-submit", { sessionId: session.sessionId, references, signal, command });
++						signal.throwIfAborted();
++					},
+ 					steerQueue: () => {
+ 						this.steerQueue(session, shell);
+ 					},
+@@ -15879,8 +15895,17 @@
  			* exactly one path; a failed first prompt is an ordinary prompt failure
  			* (banner via promptError, draft restored only while untouched).
  			*/
@@ -22,7 +72,7 @@ index 4bfdd13..1c897fe 100644
  				return this.conversation().sendSession(session, text, attachmentIds, mode, signal);
  			}
  			/**
-@@ -16064,6 +16073,8 @@ window.__ModuleLoader__.load({
+@@ -16064,6 +16089,8 @@
  			"image.tooManyPixels": "图片分辨率过大，请压缩后重试",
  			"image.dimensionTooLarge": "图片宽高不能超过 {size}px，请缩小后重试",
  			"image.modelUnsupported": "当前模型不支持图片，请切换支持图片的模型",
@@ -31,7 +81,7 @@ index 4bfdd13..1c897fe 100644
  			"image.sendFailed": "图片发送失败（{reason}），请重新添加图片后再试",
  			"file.pending": "待发送文件",
  			"file.remove": "移除文件 {name}",
-@@ -16083,8 +16094,8 @@ window.__ModuleLoader__.load({
+@@ -16083,8 +16110,8 @@
  			"settings.enter.description": "智能体运行时 Enter 键和发送按钮的行为；Cmd/Ctrl+Enter 使用另一行为",
  			"settings.enter.queue": "排队发送",
  			"settings.enter.steer": "插话发送",
@@ -42,7 +92,7 @@ index 4bfdd13..1c897fe 100644
  			"hero.chooseWorkspace": "选择工作区",
  			"session.hierarchy": "会话层级",
  			"todo.title": "任务",
-@@ -16440,6 +16451,8 @@ window.__ModuleLoader__.load({
+@@ -16440,6 +16467,8 @@
  			"image.tooManyPixels": "Image resolution is too high; compress it and try again",
  			"image.dimensionTooLarge": "Image sides must be at most {size}px; downscale it and try again",
  			"image.modelUnsupported": "The current model does not support images; switch to a model that does",
@@ -51,7 +101,7 @@ index 4bfdd13..1c897fe 100644
  			"image.sendFailed": "Sending images failed ({reason}); re-add them and try again",
  			"file.pending": "Pending files",
  			"file.remove": "Remove file {name}",
-@@ -16459,8 +16472,8 @@ window.__ModuleLoader__.load({
+@@ -16459,8 +16488,8 @@
  			"settings.enter.description": "What Enter and the Send button do while the agent is running; Cmd/Ctrl+Enter uses the other behavior",
  			"settings.enter.queue": "Queue",
  			"settings.enter.steer": "Steer",
@@ -62,7 +112,7 @@ index 4bfdd13..1c897fe 100644
  			"hero.chooseWorkspace": "Choose workspace",
  			"session.hierarchy": "Session hierarchy",
  			"todo.title": "To-dos",
-@@ -17322,13 +17335,14 @@ window.__ModuleLoader__.load({
+@@ -17322,13 +17351,14 @@
  		}
  		//#endregion
  		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css.mjs
@@ -79,7 +129,7 @@ index 4bfdd13..1c897fe 100644
  			document.head.appendChild(tag);
  		}
  		var ConversationRoot_module_css_default = {
-@@ -17351,6 +17365,7 @@ window.__ModuleLoader__.load({
+@@ -17351,6 +17381,7 @@
  			"headerSessionless": "wSkVaW_headerSessionless",
  			"headerUtilities": "wSkVaW_headerUtilities",
  			"heroOptions": "wSkVaW_heroOptions",
@@ -87,7 +137,28 @@ index 4bfdd13..1c897fe 100644
  			"heroWorkspaceRow": "wSkVaW_heroWorkspaceRow",
  			"root": "wSkVaW_root",
  			"scrollBody": "wSkVaW_scrollBody",
-@@ -17813,12 +17828,17 @@ window.__ModuleLoader__.load({
+@@ -17716,10 +17747,10 @@
+ 							}, { fallback: (0, react_jsx_runtime.jsx)(HeroFish, { hovering }) })
+ 						}), (0, react_jsx_runtime.jsxs)("span", {
+ 							className: HeroShell_module_css_default.titleGroup,
+-							children: [(0, react_jsx_runtime.jsx)("span", { children: t("hero.headline") }), (0, react_jsx_runtime.jsx)("span", {
++							children: renderSlot("conversation.hero.brand.title", {}, { fallback: [(0, react_jsx_runtime.jsx)("span", { children: t("hero.headline") }), (0, react_jsx_runtime.jsx)("span", {
+ 								className: HeroShell_module_css_default.previewBadge,
+ 								children: t("hero.preview")
+-							})]
++							})] })
+ 						})]
+ 					}), (0, react_jsx_runtime.jsx)("div", { className: HeroShell_module_css_default.body })]
+ 				}), children]
+@@ -17784,6 +17815,7 @@
+ 			const chipTitle = storedChipTitle === void 0 ? void 0 : workspaceDisplayTitle(storedChipTitle, t("workspace.defaultName"));
+ 			const heroWorkspaceRow = (0, react_jsx_runtime.jsxs)("div", {
+ 				className: ConversationRoot_module_css_default.heroWorkspaceRow,
++				"data-dsh-hero-controls": true,
+ 				children: [
+ 					(0, react_jsx_runtime.jsx)(WorkspaceChip, {
+ 						buttonRef: pickerAnchor,
+@@ -17813,12 +17845,17 @@
  					sessionId === void 0 ? null : (0, react_jsx_runtime.jsx)("div", {
  						className: ConversationRoot_module_css_default.heroOptions,
  						children: renderSlot("conversation.hero.options", {})
@@ -105,7 +176,7 @@ index 4bfdd13..1c897fe 100644
  				...inert ? {
  					disabled: true,
  					placeholder: t("placeholder.workspace"),
-@@ -17840,7 +17860,8 @@ window.__ModuleLoader__.load({
+@@ -17840,7 +17877,8 @@
  					}),
  					hero && heroWorkspaceRow,
  					zone !== void 0 && renderSlot("conversation.input.dock", zone),
@@ -115,7 +186,7 @@ index 4bfdd13..1c897fe 100644
  				]
  			});
  			const composer = renderSlotChain("conversation.composer", {
-@@ -17884,7 +17905,8 @@ window.__ModuleLoader__.load({
+@@ -17884,7 +17922,8 @@
  		* @returns the Conversation subtree.
  		*/
  		function ConversationPanel({ renderSlot }) {
@@ -125,7 +196,7 @@ index 4bfdd13..1c897fe 100644
  		}
  		//#endregion
  		//#region lib/types/client/skeleton/ConversationHeader.js
-@@ -18700,13 +18722,16 @@ window.__ModuleLoader__.load({
+@@ -18700,13 +18739,16 @@
  		}
  		//#endregion
  		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-conversation/src/client/skeleton/InputBar.module.css.mjs
@@ -144,7 +215,7 @@ index 4bfdd13..1c897fe 100644
  			document.head.appendChild(tag);
  		}
  		var InputBar_module_css_default = {
-@@ -18728,6 +18753,7 @@ window.__ModuleLoader__.load({
+@@ -18728,6 +18770,7 @@
  			"pending": "uV2eYG_pending",
  			"placeholder": "uV2eYG_placeholder",
  			"primary": "uV2eYG_primary",
@@ -152,7 +223,7 @@ index 4bfdd13..1c897fe 100644
  			"retry": "uV2eYG_retry",
  			"root": "uV2eYG_root",
  			"row": "uV2eYG_row",
-@@ -18754,7 +18780,7 @@ window.__ModuleLoader__.load({
+@@ -18754,7 +18797,7 @@
  		* The no-session state renders the SAME div inert as the Workspace-picker
  		* trigger instead of a parallel tree.
  		*/
@@ -161,7 +232,7 @@ index 4bfdd13..1c897fe 100644
  			const input = useInput((s) => s);
  			const notice = useNotices((s) => s);
  			const busyEnter = useBusyEnter((s) => s);
-@@ -18999,10 +19025,6 @@ window.__ModuleLoader__.load({
+@@ -18999,10 +19042,6 @@
  								"data-composer-overlay": true,
  								children: renderSlot("conversation.input.overlay", {})
  							}),
@@ -172,7 +243,7 @@ index 4bfdd13..1c897fe 100644
  							renderSlot("conversation.input.attachments", {
  								attachments,
  								canAcceptDrop,
-@@ -19014,25 +19036,35 @@ window.__ModuleLoader__.load({
+@@ -19014,25 +19053,35 @@
  								onRetryFile: (id) => {
  									retryFileUpload?.(id);
  								},
@@ -222,7 +293,7 @@ index 4bfdd13..1c897fe 100644
  							}),
  							(0, react_jsx_runtime.jsxs)("div", {
  								ref: rowRef,
-@@ -19160,8 +19192,7 @@ window.__ModuleLoader__.load({
+@@ -19160,8 +19209,7 @@
  					}),
  					(0, react_jsx_runtime.jsxs)("div", {
  						className: InputBar_module_css_default.dock,
@@ -232,7 +303,15 @@ index 4bfdd13..1c897fe 100644
  							useProjection,
  							t
  						})]
-@@ -19766,6 +19797,14 @@ window.__ModuleLoader__.load({
+@@ -19751,6 +19799,7 @@
+ 						kind: "list",
+ 						scope: "session"
+ 					},
++					"conversation.hero.brand.title": { kind: "single", scope: "root" },
+ 					"conversation.hero.brand.mark": {
+ 						kind: "single",
+ 						scope: "root"
+@@ -19766,6 +19815,14 @@
  					"conversation.hero.options": {
  						kind: "list",
  						scope: "session"
@@ -247,7 +326,7 @@ index 4bfdd13..1c897fe 100644
  					}
  				},
  				slots: {
-@@ -19889,6 +19928,10 @@ window.__ModuleLoader__.load({
+@@ -19889,6 +19946,10 @@
  						kind: "list",
  						scope: "session"
  					},
@@ -258,7 +337,7 @@ index 4bfdd13..1c897fe 100644
  					"conversation.input.permission": {
  						kind: "single",
  						scope: "session"
-@@ -19925,6 +19968,7 @@ window.__ModuleLoader__.load({
+@@ -19925,6 +19986,7 @@
  						removeAttachment: void 0,
  						resolveDraftAttachments: void 0,
  						retryFileUpload: void 0,
@@ -266,7 +345,7 @@ index 4bfdd13..1c897fe 100644
  						toggleCommandMenu: void 0,
  						stop: void 0,
  						hooks: {
-@@ -19991,6 +20035,11 @@ window.__ModuleLoader__.load({
+@@ -19991,6 +20053,11 @@
  						retryFileUpload: (id) => {
  							if (sessions.binding(sessionId) !== void 0) conversation.retryFileUpload(sessionId, id);
  						},
@@ -278,7 +357,7 @@ index 4bfdd13..1c897fe 100644
  						toggleCommandMenu: inputTriggers === void 0 ? void 0 : (selection) => {
  							shell.dismissPopup();
  							const snapshot = shell.snapshot;
-@@ -20023,10 +20072,7 @@ window.__ModuleLoader__.load({
+@@ -20023,10 +20090,7 @@
  				yield slots.register({
  					name: "main",
  					key: "conversation",
@@ -290,11 +369,34 @@ index 4bfdd13..1c897fe 100644
  				}, ConversationPanel);
  				yield registerConversationRoot();
  				yield registerConversationContent();
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/draft-editor.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/draft-editor.d.ts
+--- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/draft-editor.d.ts
++++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/draft-editor.d.ts
+@@ -13,7 +13,7 @@
+     readonly source: string;
+     readonly ref: string;
+     readonly label: string;
+-    readonly appearance?: 'session' | 'file' | 'folder';
++    readonly appearance?: 'session' | 'file' | 'folder' | 'skill' | 'tool';
+     readonly clipboardText: string;
+ }
+ /** Persisted reference data without the current editor's occurrence identity. */
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/input.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/input.d.ts
+--- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/input.d.ts
++++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/input.d.ts
+@@ -128,6 +128,8 @@
+ }
+ declare module '@deepseek-ai/cordis' {
+     interface Events {
++        /** Commit host context from this immutable message snapshot before dispatch. Failures restore the draft. @mode serial */
++        'conversation/input-before-submit'(request: { readonly sessionId: string; readonly references: readonly Occurrence[]; readonly signal: AbortSignal; readonly command?: { readonly name: string; readonly args: string } }): Promise<void>;
+         /**
+          * Claim a command token for the scoped input machine.
+          * @param request - command claim and span.
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
-index 14e942f..3f04265 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/contract/slots.d.ts
-@@ -194,6 +194,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+@@ -194,6 +194,12 @@
                  };
              };
          };
@@ -307,7 +409,16 @@ index 14e942f..3f04265 100644
          /** Conversation shell beneath its root-scoped main-panel entry. */
          'main.conversation': {
              kind: 'single';
-@@ -291,6 +297,18 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+@@ -274,6 +280,8 @@
+             scope: 'root';
+             owner: EmptyWorkspaceOwnerProps;
+         };
++        /** Optional welcome title; defaults to the upstream title and badge. */
++        'conversation.hero.brand.title': { kind: 'single'; scope: 'root'; owner: Record<string, never>; };
+         /** Brand mark shown before the blank-session headline. */
+         'conversation.hero.brand.mark': {
+             kind: 'single';
+@@ -291,6 +299,18 @@
              kind: 'list';
              scope: 'session';
          };
@@ -326,7 +437,7 @@ index 14e942f..3f04265 100644
          /** Full-width entries above the composer card. */
          'conversation.input.dock': {
              kind: 'list';
-@@ -302,10 +320,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+@@ -302,10 +322,17 @@
              kind: 'list';
              scope: 'session';
          };
@@ -344,7 +455,15 @@ index 14e942f..3f04265 100644
          };
          /** Compact controls at the left of the composer tool row. */
          'conversation.input.left': {
-@@ -525,8 +550,10 @@ export interface ComposerBarOwnerProps {
+@@ -380,6 +407,7 @@
+                     kind: 'list';
+                     scope: 'session';
+                 };
++                'conversation.hero.brand.title': { kind: 'single'; scope: 'root'; };
+                 'conversation.hero.brand.mark': {
+                     kind: 'single';
+                     scope: 'root';
+@@ -525,8 +553,10 @@
      /** Open the Workspace picker from the inert composer surface. */
      onRequestWorkspace?: () => void;
      placeholder?: string;
@@ -356,7 +475,7 @@ index 14e942f..3f04265 100644
  }
  /** Package-private operations injected into the resident composer bar. */
  export interface ComposerBarInjected {
-@@ -571,7 +598,7 @@ export interface InputActivityOwnerProps extends InputControlOwnerProps {
+@@ -571,7 +601,7 @@
      onActiveChange: (active: boolean) => void;
  }
  /** Full props of the resident composer bar. */
@@ -365,14 +484,37 @@ index 14e942f..3f04265 100644
  /** Owner values used to elect a composer takeover. */
  export interface ComposerChainProps {
      /** Current Session identity used by temporary business-owned entries. */
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/input/facade.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/input/facade.d.ts
+--- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/input/facade.d.ts
++++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/input/facade.d.ts
+@@ -13,7 +13,7 @@
+ import { type ObservableSnapshot, type SnapshotStore } from '@deepseek-ai/dsh-client-store';
+ import type { LexicalEditor } from 'lexical';
+ import type { CommandClaim, ConsumeTokenRequest, DraftAttachmentId, DraftInitializationOptions, DraftInitializationResult, InputActions, InputNotice, InputState, InputTriggerController, SessionInput, SubmitAttachment, SubmitOutcome } from '../contract/input.ts';
+-import type { ArbitrateKey, ArbitrateOutcome, ComposerKeyboard, DraftInput, DraftSnapshot, ReferenceInsert, TokenSpan } from '../contract/draft-editor.ts';
++import type { ArbitrateKey, ArbitrateOutcome, ComposerKeyboard, DraftInput, DraftSnapshot, Occurrence, ReferenceInsert, TokenSpan } from '../contract/draft-editor.ts';
+ import type { InputSubmitMode, MessageSubmission, MessageSubmissionState } from '../contract/composer-submission.ts';
+ /** Popup face the shell needs (dismissal only; typed structurally to avoid a value import). */
+ export interface PopupDismissFace {
+@@ -43,7 +43,9 @@
+      */
+     steerQueue?: (() => void) | undefined;
+     /** The plain-message sink (send choreography / materialize fork — the hub owns it). */
+-    defaultSink(text: string, attachmentIds: readonly DraftAttachmentId[], mode: InputSubmitMode, signal: AbortSignal): Promise<SubmitOutcome>;
++    defaultSink(text: string, attachmentIds: readonly DraftAttachmentId[], mode: InputSubmitMode, signal: AbortSignal, references?: readonly Occurrence[]): Promise<SubmitOutcome>;
++    /** Await host context admission from the claimed command's immutable reference snapshot. */
++    beforeCommandSubmit?(command: { readonly name: string; readonly args: string }, references: readonly Occurrence[], signal: AbortSignal): Promise<void>;
+     /** Command-plane attachment plumbing (the hub owns the conversation face and the copy). */
+     commandAttachments: {
+         /** Resolve ordered draft ids to wire payloads without sending them; rejects when an id no longer resolves. */
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
-index 046ea88..1b46f8d 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/skeleton/ConversationPanel.d.ts
-@@ -5,5 +5,5 @@ import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-
+@@ -5,5 +5,5 @@
   * @param props - main-slot inputs and the declared Conversation renderer.
   * @returns the Conversation subtree.
   */
 -export declare function ConversationPanel({ renderSlot }: PropsRuntime<'main'> & PropsRenderSlots<'main.conversation'>): import("react").ReactNode;
 +export declare function ConversationPanel({ renderSlot }: PropsRuntime<'main'> & PropsRenderSlots<'main.conversation' | 'desktop.workbench.frame'>): import("react").ReactNode;
  //# sourceMappingURL=ConversationPanel.d.ts.map
+\ No newline at end of file

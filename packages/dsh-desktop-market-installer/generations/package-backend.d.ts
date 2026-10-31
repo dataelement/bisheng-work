@@ -19,6 +19,7 @@ export interface ProfileBundleInstallRequest {
 }
 
 export interface ProfileBundlePackageBackend {
+  supportsVerifiedInstall: true
   /** Resolves undefined for a shared-tree package (the market); pnpm installs it. */
   install(request: ProfileBundleInstallRequest): Promise<{
     packageResult: PackageResult

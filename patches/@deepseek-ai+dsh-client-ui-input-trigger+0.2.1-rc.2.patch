@@ -1,0 +1,152 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js
+--- a/node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js
+@@ -944,7 +944,7 @@
+ 					if (hl && next.source === hl.source && next.index === hl.index) return state;
+ 					return {
+ 						...state,
+-						highlight: next
++						highlight: { ...next, origin: "keyboard" }
+ 					};
+ 				}
+ 				case "hover": {
+@@ -958,7 +958,7 @@
+ 					if (hl && hl.source === target.source && hl.index === target.index) return state;
+ 					return {
+ 						...state,
+-						highlight: target
++						highlight: { ...target, origin: "pointer" }
+ 					};
+ 				}
+ 				case "close": return closed(state);
+@@ -1625,7 +1625,7 @@
+ 		}
+ 		//#endregion
+ 		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-input-trigger/src/client/MenuView.module.css.mjs
+-		const css = "._3e4SsG_menu{z-index:100;box-sizing:border-box;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);--dsh-scrollbar-width:6px;--dsh-scrollbar-thumb-border:2px;--dsh-scrollbar-track-margin:12px;--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);max-height:400px;box-shadow:var(--dsw-elevation-prominent);border:0;flex-direction:column;padding:4px;display:flex;position:absolute;bottom:calc(100% + 4px);left:0;right:0;overflow:hidden}._3e4SsG_menu[data-overflow-below]:after{content:\"\";background:linear-gradient(to bottom, transparent, var(--dsw-specific-menu));pointer-events:none;height:16px;position:absolute;bottom:4px;left:4px;right:14px}._3e4SsG_viewport{flex-direction:column;min-height:0;display:flex;overflow-y:auto}._3e4SsG_item{border-radius:var(--dsw-radius-md);cursor:pointer;width:100%;min-height:34px;color:var(--dsw-alias-label-primary);text-align:left;background:0 0;border:none;align-items:center;gap:6px;padding:6px 8px;font-size:13px;line-height:20px;display:flex}._3e4SsG_item._3e4SsG_active{background:var(--dsw-alias-interactive-bg-hover)}._3e4SsG_sectionTitle{min-height:23px;color:var(--dsw-alias-label-tertiary);flex:none;padding:5px 8px 2px;font-size:11px;font-weight:500;line-height:16px}._3e4SsG_sectionTitle:not(:first-child){margin-top:3px}._3e4SsG_itemIcon{width:14px;height:14px;color:var(--dsw-alias-menu-icon);flex:none;justify-content:center;align-items:center;display:inline-flex}._3e4SsG_itemIcon svg{width:14px;height:14px}._3e4SsG_itemName{text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:40%;overflow:hidden}._3e4SsG_itemAlias{text-overflow:ellipsis;white-space:nowrap;max-width:20%;color:var(--dsw-alias-label-tertiary);flex:none;font-size:12px;line-height:18px;overflow:hidden}._3e4SsG_itemDescription{text-overflow:ellipsis;white-space:nowrap;text-align:right;min-width:0;color:var(--dsw-alias-label-tertiary);flex:1;font-size:12px;line-height:18px;overflow:hidden}._3e4SsG_trailing{flex:none;align-items:center;gap:3px;margin-left:auto;display:inline-flex}._3e4SsG_drillHintText{color:var(--dsw-alias-label-caption);white-space:nowrap;font-size:10px;line-height:16px;display:none}._3e4SsG_drillHint{border-radius:var(--dsw-radius-xs);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-caption);padding:0 4px;font-family:inherit;font-size:10px;line-height:16px;display:none}._3e4SsG_item._3e4SsG_active ._3e4SsG_drillHintText,._3e4SsG_item._3e4SsG_active ._3e4SsG_drillHint{display:inline-flex}._3e4SsG_drill{border-radius:var(--dsw-radius-xs);width:18px;height:18px;color:var(--dsw-alias-menu-icon);flex:none;place-items:center;display:inline-grid}._3e4SsG_drill:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}._3e4SsG_groupTitle{color:var(--dsw-alias-label-tertiary);padding:6px 8px;font-size:11px;line-height:15px}._3e4SsG_skeletonRow{box-sizing:border-box;align-items:center;min-height:34px;padding:6px 8px;display:flex}._3e4SsG_skeletonBar{border-radius:var(--dsw-radius-xs);background:var(--dsw-alias-bg-skeleton);height:18px;animation:2s cubic-bezier(.36,0,.64,1) infinite _3e4SsG_dsh-menu-skeleton}@keyframes _3e4SsG_dsh-menu-skeleton{0%{opacity:1}40%{opacity:.6}80%,to{opacity:1}}._3e4SsG_crumbs{border-bottom:.5px solid var(--dsw-alias-border-l1);flex-wrap:wrap;flex:none;align-items:center;gap:2px;margin-bottom:2px;padding:3px 3px 5px;display:flex}._3e4SsG_crumb{border-radius:var(--dsw-radius-sm);max-width:40%;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-overflow:ellipsis;white-space:nowrap;background:0 0;border:none;flex:0 auto;padding:2px 5px;font-family:inherit;font-size:11px;line-height:16px;overflow:hidden}._3e4SsG_crumb:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}._3e4SsG_crumbCurrent,._3e4SsG_crumbCurrent:hover{color:var(--dsw-alias-label-primary);cursor:default;background:0 0}._3e4SsG_crumbSeparator{color:var(--dsw-alias-menu-icon);flex:none;display:inline-flex}";
++		const css = "._3e4SsG_menu{z-index:100;box-sizing:border-box;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);--dsh-scrollbar-width:6px;--dsh-scrollbar-thumb-border:2px;--dsh-scrollbar-track-margin:12px;--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);max-height:400px;box-shadow:var(--dsw-elevation-prominent);border:0;flex-direction:column;padding:4px;display:flex;position:absolute;bottom:calc(100% + 4px - var(--dsh-trigger-menu-shift,0px));left:0;right:0;overflow:hidden}._3e4SsG_menu[data-overflow-below]:after{content:\"\";background:linear-gradient(to bottom, transparent, var(--dsw-specific-menu));pointer-events:none;height:16px;position:absolute;bottom:4px;left:4px;right:14px}._3e4SsG_viewport{flex-direction:column;min-height:0;display:flex;overflow-y:auto}._3e4SsG_item{border-radius:var(--dsw-radius-md);cursor:pointer;flex:none;width:100%;min-height:34px;color:var(--dsw-alias-label-primary);text-align:left;background:0 0;border:none;align-items:center;gap:6px;padding:6px 8px;font-size:13px;line-height:20px;display:flex}._3e4SsG_item._3e4SsG_active{background:var(--dsw-alias-interactive-bg-hover)}._3e4SsG_sectionTitle{min-height:23px;color:var(--dsw-alias-label-tertiary);flex:none;padding:5px 8px 2px;font-size:11px;font-weight:500;line-height:16px}._3e4SsG_sectionTitle:not(:first-child){margin-top:3px}._3e4SsG_itemIcon{width:14px;height:14px;color:var(--dsw-alias-menu-icon);flex:none;justify-content:center;align-items:center;display:inline-flex}._3e4SsG_itemIcon svg{width:14px;height:14px}._3e4SsG_itemName{text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:40%;overflow:hidden}._3e4SsG_itemAlias{text-overflow:ellipsis;white-space:nowrap;max-width:20%;color:var(--dsw-alias-label-tertiary);flex:none;font-size:12px;line-height:18px;overflow:hidden}._3e4SsG_itemDescription{text-overflow:ellipsis;white-space:nowrap;text-align:right;min-width:0;color:var(--dsw-alias-label-tertiary);flex:1;font-size:12px;line-height:18px;overflow:hidden}._3e4SsG_trailing{flex:none;align-items:center;gap:3px;margin-left:auto;display:inline-flex}._3e4SsG_drillHintText{color:var(--dsw-alias-label-caption);white-space:nowrap;font-size:10px;line-height:16px;display:none}._3e4SsG_drillHint{border-radius:var(--dsw-radius-xs);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-caption);padding:0 4px;font-family:inherit;font-size:10px;line-height:16px;display:none}._3e4SsG_item._3e4SsG_active ._3e4SsG_drillHintText,._3e4SsG_item._3e4SsG_active ._3e4SsG_drillHint{display:inline-flex}._3e4SsG_drill{border-radius:var(--dsw-radius-xs);width:18px;height:18px;color:var(--dsw-alias-menu-icon);flex:none;place-items:center;display:inline-grid}._3e4SsG_drill:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}._3e4SsG_groupTitle{color:var(--dsw-alias-label-tertiary);padding:6px 8px;font-size:11px;line-height:15px}._3e4SsG_skeletonRow{box-sizing:border-box;align-items:center;min-height:34px;padding:6px 8px;display:flex}._3e4SsG_skeletonBar{border-radius:var(--dsw-radius-xs);background:var(--dsw-alias-bg-skeleton);height:18px;animation:2s cubic-bezier(.36,0,.64,1) infinite _3e4SsG_dsh-menu-skeleton}@keyframes _3e4SsG_dsh-menu-skeleton{0%{opacity:1}40%{opacity:.6}80%,to{opacity:1}}._3e4SsG_crumbs{border-bottom:.5px solid var(--dsw-alias-border-l1);flex-wrap:wrap;flex:none;align-items:center;gap:2px;margin-bottom:2px;padding:3px 3px 5px;display:flex}._3e4SsG_crumb{border-radius:var(--dsw-radius-sm);max-width:40%;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-overflow:ellipsis;white-space:nowrap;background:0 0;border:none;flex:0 auto;padding:2px 5px;font-family:inherit;font-size:11px;line-height:16px;overflow:hidden}._3e4SsG_crumb:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}._3e4SsG_crumbCurrent,._3e4SsG_crumbCurrent:hover{color:var(--dsw-alias-label-primary);cursor:default;background:0 0}._3e4SsG_crumbSeparator{color:var(--dsw-alias-menu-icon);flex:none;display:inline-flex}";
+ 		const tagId = "@deepseek-ai/dsh-client-ui-input-trigger/MenuView.module.css";
+ 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
+ 			const tag = document.createElement("style");
+@@ -1673,14 +1673,60 @@
+ 		* (a localized title), then the description right-aligned. A source publishing crumbs gets a breadcrumb
+ 		* header pinned above the scrolling list.
+ 		*/
+-		/** Height cap that fits the two headings and eight built-in command rows. */
++		/** Design height at the default 20px row line-height. */
+ 		const MAX_HEIGHT = 400;
+-		/**
+-		* Viewport top margin: the conversation header's 76px block (title row plus
+-		* view tabs, ui-conversation) plus 8px of air, so a tall list stops below the
+-		* header instead of sliding under it.
+-		*/
+-		const TOP_MARGIN = 84;
++		/** Fit inside the actual scroll/clip ancestors in the menu's coordinate space. */
++		function useMenuLayout(ref, state) {
++			const [layout, setLayout] = (0, react.useState)({ maxHeight: MAX_HEIGHT });
++			(0, react.useLayoutEffect)(() => {
++				const menu = ref.current;
++				if (menu === null) return;
++				const ancestors = [];
++				for (let parent = menu.parentElement; parent; parent = parent.parentElement) ancestors.push(parent);
++				const fit = () => {
++					const bounds = menu.getBoundingClientRect();
++					const scale = menu.offsetWidth > 0 ? bounds.width / menu.offsetWidth : 1;
++					const anchor = menu.offsetParent ?? menu.parentElement;
++					const anchorBottom = anchor.getBoundingClientRect().top + anchor.clientTop * scale - 4 * scale;
++					let top = window.visualViewport?.offsetTop ?? 0;
++					let bottom = top + (window.visualViewport?.height ?? window.innerHeight);
++					for (const parent of ancestors) {
++						if (/^(auto|scroll|hidden|clip)$/.test(getComputedStyle(parent).overflowY)) {
++							const rect = parent.getBoundingClientRect();
++							const parentScale = parent.offsetHeight > 0 ? rect.height / parent.offsetHeight : 1;
++							top = Math.max(top, rect.top + parent.clientTop * parentScale);
++							bottom = Math.min(bottom, rect.top + (parent.clientTop + parent.clientHeight) * parentScale);
++						}
++					}
++					const row = menu.querySelector('[role="option"]');
++					const lineHeight = row ? Number.parseFloat(getComputedStyle(row).lineHeight) : 20;
++					const cap = MAX_HEIGHT * (Number.isFinite(lineHeight) ? lineHeight / 20 : 1);
++					// In a short/zoomed pane, keep two rows accessible by letting the menu
++					// occupy the pane above the composer. Its scrollport owns all overflow.
++					const rowHeight = row ? row.getBoundingClientRect().height / scale : 34;
++					const crumbsHeight = [...menu.querySelectorAll("nav")].reduce((sum, nav) => sum + nav.getBoundingClientRect().height / scale, 0);
++					const minimum = Math.min(cap, rowHeight * 2 + crumbsHeight + 40);
++					const fittedBottom = Math.min(bottom - 8 * scale, Math.max(anchorBottom, top + (minimum + 8) * scale));
++					const maxHeight = Math.floor(Math.min(cap, Math.max(0, (fittedBottom - top) / scale - 8)) * 64) / 64;
++					const shift = `${Math.round((fittedBottom - anchorBottom) / scale * 64) / 64}px`;
++					setLayout((previous) => previous.maxHeight === maxHeight && previous["--dsh-trigger-menu-shift"] === shift ? previous : { maxHeight, "--dsh-trigger-menu-shift": shift });
++				};
++				fit();
++				const observer = new ResizeObserver(fit);
++				// Ancestors track composer/header layout; rows track live font changes.
++				for (const element of [...ancestors, menu, ...menu.querySelectorAll('[role="option"], nav')]) observer.observe(element);
++				window.addEventListener("resize", fit);
++				window.addEventListener("scroll", fit, true);
++				window.visualViewport?.addEventListener("resize", fit);
++				return () => {
++					observer.disconnect();
++					window.removeEventListener("resize", fit);
++					window.removeEventListener("scroll", fit, true);
++					window.visualViewport?.removeEventListener("resize", fit);
++				};
++			}, [ref, state]);
++			return layout;
++		}
+ 		/** DOM id of one option row (the aria-activedescendant target). */
+ 		function optionId(source, index) {
+ 			return `dsh-slash-option-${source}-${index}`;
+@@ -1696,7 +1742,7 @@
+ 			const listRef = (0, react.useRef)(null);
+ 			const viewportRef = (0, react.useRef)(null);
+ 			const [hasOverflowBelow, setHasOverflowBelow] = (0, react.useState)(false);
+-			const maxHeight = (0, _deepseek_ai_dsh_client_ui_primitives.useAnchoredMaxHeight)(listRef, MAX_HEIGHT, state, TOP_MARGIN);
++			const layout = useMenuLayout(listRef, state);
+ 			const updateOverflowHint = (0, react.useCallback)(() => {
+ 				const viewport = viewportRef.current;
+ 				setHasOverflowBelow(viewport !== null && viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1);
+@@ -1705,13 +1751,20 @@
+ 				updateOverflowHint();
+ 			}, [
+ 				state,
+-				maxHeight,
++				layout,
+ 				updateOverflowHint
+ 			]);
+ 			const highlight = state.open ? state.highlight : null;
+ 			(0, react.useEffect)(() => {
+-				if (highlight === null) return;
+-				document.getElementById(optionId(highlight.source, highlight.index))?.scrollIntoView({ block: "nearest" });
++				if (highlight === null || highlight.origin === "pointer") return;
++				const viewport = viewportRef.current;
++				const option = document.getElementById(optionId(highlight.source, highlight.index));
++				if (viewport === null || option === null || !viewport.contains(option)) return;
++				const bounds = viewport.getBoundingClientRect();
++				const row = option.getBoundingClientRect();
++				// Keyboard navigation reveals the row within this list; the composer stays anchored.
++				if (row.top < bounds.top) viewport.scrollTop += row.top - bounds.top;
++				else if (row.bottom > bounds.bottom) viewport.scrollTop += row.bottom - bounds.bottom;
+ 			}, [highlight]);
+ 			(0, react.useEffect)(() => {
+ 				if (!state.open) return;
+@@ -1730,7 +1783,7 @@
+ 			return (0, react_jsx_runtime.jsxs)(_deepseek_ai_dsh_client_ui_primitives.MenuSurface, {
+ 				ref: listRef,
+ 				className: MenuView_module_css_default.menu,
+-				style: { maxHeight },
++				style: layout,
+ 				"data-trigger-menu": "",
+ 				"data-overflow-below": hasOverflowBelow || void 0,
+ 				children: [state.groups.map((group) => {
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/types/core/contract.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/types/core/contract.d.ts
+--- a/node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/types/core/contract.d.ts
++++ b/node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/types/core/contract.d.ts
+@@ -42,6 +42,8 @@
+     readonly highlight: {
+         readonly source: string;
+         readonly index: number;
++        /** Pointer highlighting preserves the scroll position; keyboard movement reveals the row. */
++        readonly origin?: 'pointer' | 'keyboard';
+     } | null;
+ }
+ /** Menu reduction events. Source failure = silent group removal (log only; no error UI tier). */

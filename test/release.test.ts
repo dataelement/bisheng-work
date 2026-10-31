@@ -5,13 +5,14 @@ import { describe, expect, it } from 'vitest'
 
 const projectRoot = path.resolve(import.meta.dirname, '..')
 
-it('prepares the Office and PPT runtimes before focused Windows regressions', async () => {
+it('prepares only the PPT runtime before focused Windows regressions', async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(projectRoot, 'package.json'), 'utf8')
   ) as { scripts: Record<string, string> }
 
-  expect(packageJson.scripts['pretest:windows']).toBe('npm run office:prepare && npm run ppt:build')
-  expect(packageJson.scripts['pretest:windows']).toBe(packageJson.scripts.pretest)
+  expect(packageJson.scripts['pretest:windows']).toBe('npm run ppt:build')
+  expect(packageJson.scripts.pretest).toBe('npm run reference-icons:prepare && npm run office:prepare && npm run ppt:build')
+  expect(packageJson.scripts.build).toContain('npm run office:prepare')
 })
 
 it('defaults Windows to focused regressions and makes recovery UI an explicit dispatch check', async () => {
@@ -26,9 +27,12 @@ it('defaults Windows to focused regressions and makes recovery UI an explicit di
   const focused = steps.find(step => step.name === 'Run focused Windows regressions')
   const complete = steps.find(step => step.name === 'Run complete Windows test suite')
   const recovery = steps.find(step => step.name === 'Check recovery UI on native Windows at three display scales')
-  expect(focused?.run).toBe('npm run test:windows')
-  expect(complete?.run).toBe('npm test')
-  expect(steps.some(step => step.run === 'npm run build')).toBe(false)
+  expect(focused?.run).toBe('npx --no-install vitest run --config vitest.windows.config.ts')
+  expect(complete?.run).toBe('npx --no-install vitest run')
+  const buildIndex = steps.findIndex(step => step.name === 'Build Windows application once')
+  expect(buildIndex).toBeGreaterThan(-1)
+  expect(buildIndex).toBeLessThan(steps.findIndex(step => step === focused))
+  expect(buildIndex).toBeLessThan(steps.findIndex(step => step === complete))
   expect(workflow.on.workflow_dispatch.inputs.windows_full_tests?.default).toBe(false)
   expect(workflow.on.workflow_dispatch.inputs.windows_recovery_ui?.default).toBe(false)
   const evaluate = (expression: string | undefined, event: string, inputs: Record<string, boolean>) =>
@@ -377,7 +381,16 @@ describe('GitHub release contract', () => {
     expect(workflow).toContain('merge-mac-update-metadata.mjs')
     expect(workflow).toContain('Verify release assets before publication')
     expect(workflow).toContain('verify-release-assets.mjs release-assets')
-    expect(workflow).toContain('dist/${{ matrix.app-directory }}/BISHENG.app')
+    expect(workflow).toContain('Configure isolated macOS output')
+    expect(workflow).toContain(
+      'MACOS_OUTPUT_DIR=$RUNNER_TEMP/bisheng-macos-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.arch }}'
+    )
+    expect(workflow).toContain('--config.directories.output="$MACOS_OUTPUT_DIR"')
+    expect(workflow).toContain('$MACOS_OUTPUT_DIR/${{ matrix.app-directory }}/BISHENG.app')
+    expect(workflow).toContain(
+      'stage-development-assets.mjs ${{ matrix.arch }} "$MACOS_OUTPUT_DIR"'
+    )
+    expect(workflow).not.toContain('dist/${{ matrix.app-directory }}/BISHENG.app')
     expect(workflow).toContain('dist\\win-unpacked\\BISHENG.exe')
     expect(workflow).toContain("--name 'BISHENG'")
     expect(workflow).toContain('--title "BISHENG $release_tag"')
@@ -446,7 +459,7 @@ describe('GitHub release contract', () => {
     expect(workflow).toContain('runs-on: ${' + '{ matrix.runner }}')
     expect(workflow).toContain('runs-on: [self-hosted, macOS, bisheng-windows]')
     expect(workflow).toContain('runs-on: windows-2022')
-    expect(workflow).toContain('npm run package:dev:win')
+    expect(workflow).toContain('node scripts/electron-builder-windows.mjs --win --x64 --publish never --config electron-builder.dev.cjs')
     expect(workflow).toContain('Smoke test packaged Windows Harness')
     expect(workflow).toContain('$sourceExecutable = Get-Item $env:SMOKE_EXE')
     expect(workflow).toContain("$isolatedApp = Join-Path $env:RUNNER_TEMP")
@@ -463,6 +476,9 @@ describe('GitHub release contract', () => {
     expect(workflow).toContain("Invoke-HarnessRpc 'workspace/create'")
     expect(workflow).toContain("Invoke-HarnessRpc 'session/create'")
     expect(workflow).toContain('Harness process exited after workspace and session creation.')
+    expect(workflow).toContain('& taskkill.exe /PID $desktop.Id /T /F')
+    expect(workflow).toContain('Remove-Item -Recurse -Force $isolatedApp')
+    expect(workflow).toContain('Failed to remove packaged Windows smoke copy')
     expect(workflow).toContain('prerelease_tag:')
     expect(workflow).toContain('signed_version:')
     expect(workflow).toContain('mode:')
@@ -493,6 +509,11 @@ describe('GitHub release contract', () => {
     ]) {
       expect(workflow).toContain(`secrets.${secret}`)
     }
+    expect(workflow).toContain('bisheng-arm64-xcrun')
+    expect(workflow).toContain('if [ "${{ matrix.arch }}" = "x64" ]; then')
+    expect(workflow).toContain('exec /usr/bin/arch -arm64 /usr/bin/xcrun "$@"')
+    expect(workflow).toContain('"$xcrun_bridge/xcrun" --find notarytool')
+    expect(workflow).toContain('/usr/bin/xcrun --find notarytool')
     expect(workflow.match(/Prepare macOS signing keychain/g)).toHaveLength(1)
     expect(workflow.match(/xcrun stapler validate/g)).toHaveLength(2)
     expect(workflow.match(/xcrun notarytool submit/g)).toHaveLength(1)
@@ -580,7 +601,7 @@ describe('GitHub release contract', () => {
     const persistentJobs = Object.values(jobs).filter(job =>
       Array.isArray(job['runs-on']) && job['runs-on'].includes('self-hosted')
     )
-    expect(persistentJobs).toHaveLength(2)
+    expect(persistentJobs).toHaveLength(3)
     for (const job of persistentJobs) {
       const setup = job.steps.find(step => step.uses?.startsWith('actions/setup-node@'))
       expect(setup).toBeDefined()

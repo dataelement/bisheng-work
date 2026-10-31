@@ -1,11 +1,15 @@
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
 import React, { act } from 'react'
+import * as jsx from 'react/jsx-runtime'
+import { Context } from '@deepseek-ai/cordis'
 import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import { afterEach, expect, it, vi } from 'vitest'
 
+// Coverage AC: AC-03, AC-30, AC-31, AC-56.
 const source = await readFile(new URL('../packages/dsh-desktop-enterprise/client.js', import.meta.url), 'utf8')
+const localeSource = await readFile(new URL('../node_modules/@deepseek-ai/dsh-client-locale/lib/client.js', import.meta.url), 'utf8')
 let cleanup
 afterEach(async () => { await cleanup?.(); vi.unstubAllGlobals() })
 
@@ -17,7 +21,7 @@ async function mountMarket({ action, update = false, holdRefresh = false, plugin
   const account = { connected: true, base: 'https://company.example', tenant: { id: '1', name: 'Old company' }, user: { id: '20' }, sessionExpiresAt: new Date(Date.now() + 60000).toISOString() }
   const plugin = { id: 'a'.repeat(32), display_name: 'JSON 格式化', description: '校验并格式化 JSON。', current_version_id: 'b'.repeat(32), versions: [{ id: 'b'.repeat(32), compatible: true, version: '1.0.0', manifest: { plugin: { publisher: '企业管理员', license: 'MIT', desktop_min: '0.1.1', permissions: [], changelog: '初始版本' }, targets: { 'darwin-arm64': {} } } }] }
   const other = { ...structuredClone(plugin), id: 'c'.repeat(32), display_name: 'URL 编码' }
-  let company = 'Current company', installed = Boolean(action && action !== 'install') || update, enabled = action !== 'enable', definition
+  let company = 'Current company', installed = Boolean(action && action !== 'install') || update, enabled = action !== 'enable'
   const pendingActions = new Map()
   const installedById = new Map()
   const pendingCatalogs = []
@@ -45,14 +49,18 @@ async function mountMarket({ action, update = false, holdRefresh = false, plugin
     if (holdRefresh && ++catalogReads > 1) await new Promise(resolve => pendingCatalogs.push(resolve))
     return { ok: true, json: async () => result }
   }
-  dom.window.__ModuleLoader__ = { load: value => { definition = value } }
-  vm.runInNewContext(source, { window: dom.window, document: dom.window.document, navigator: { language: 'zh-CN' }, Date, AbortController, fetch, CustomEvent: dom.window.CustomEvent })
-  const extension = definition.factory(name => { if (name === 'react') return React; throw new Error(name) })
+  const definitions = new Map()
+  dom.window.__ModuleLoader__ = { load: value => definitions.set(value.id, value) }
+  vm.runInNewContext(localeSource + '\n' + source, { window: dom.window, document: dom.window.document, navigator: { language: 'zh-CN' }, Date, AbortController, fetch, CustomEvent: dom.window.CustomEvent })
+  const extension = definitions.get('dsh-desktop-enterprise').factory(name => { if (name === 'react') return React; throw new Error(name) })
+  const { LocaleRuntime } = definitions.get('@deepseek-ai/dsh-client-locale').factory(name =>
+    name === 'react' ? React : name === 'react/jsx-runtime' ? jsx : {})
+  const localeContext = new Context()
+  const locale = new LocaleRuntime(localeContext, undefined, { languages: ['zh-CN'], preference: null })
   const disposers = [], root = createRoot(dom.window.document.getElementById('root'))
-  cleanup = async () => { await act(async () => { disposers.reverse().forEach(dispose => dispose()); root.unmount() }); dom.window.close() }
+  cleanup = async () => { await act(async () => { disposers.reverse().forEach(dispose => dispose()); root.unmount() }); await localeContext.fiber.dispose(); dom.window.close() }
   await act(async () => {
-    const dictionaries = new Map()
-    extension.apply({ locale: { register: (ns, values) => { dictionaries.set(ns, values) }, bind: ns => key => dictionaries.get(ns).zh[key] }, effect: callback => { const dispose = callback(); if (dispose) disposers.push(dispose) }, slots: {
+    extension.apply({ locale, effect: callback => { const dispose = callback(); if (dispose) disposers.push(dispose) }, slots: {
       inject: (_slot, callback) => callback(),
       register: (config, component) => { if (config.id === 'enterprise-market') root.render(component()); return () => {} }
     } })

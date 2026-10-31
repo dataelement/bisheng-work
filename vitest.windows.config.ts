@@ -12,6 +12,9 @@ export default defineConfig({
     fileParallelism: false,
     include: [
       'test/windows-*.test.{ts,js,mjs}',
+      'test/about-presentation.test.ts',
+      'test/desktop-modes-ui.test.mjs',
+      'test/enterprise-chat-view.test.ts',
       'test/generation-*.test.{ts,js,mjs}',
       'test/profile-*.test.{ts,js,mjs}',
       'test/safe-mode*.test.ts',
@@ -29,6 +32,8 @@ export default defineConfig({
       'test/legacy-preset-migration.test.ts',
       'test/pnpm-runner.test.js',
       'test/local-path-links.test.ts',
+      'test/local-workbench-path.test.mjs',
+      'test/office-engine-resolution.test.ts',
       'test/remove-tree.test.ts',
       'test/shell-environment-encoding.test.ts',
       'test/directory-picker.test.ts',

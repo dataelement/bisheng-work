@@ -23,16 +23,16 @@
     "agent"
   ],
   "scripts": {
-    "postinstall": "patch-package && node scripts/install-brand-assets.mjs && install-electron --no",
-    "dev": "npm run office:prepare && npm run ppt:build && electron-vite dev",
-    "build": "npm run office:prepare && npm run ppt:build && electron-vite build",
+    "postinstall": "patch-package && node scripts/prepare-reference-icons.mjs && node scripts/install-brand-assets.mjs && install-electron --no",
+    "dev": "npm run reference-icons:prepare && npm run office:prepare && npm run ppt:build && electron-vite dev",
+    "build": "npm run reference-icons:prepare && npm run office:prepare && npm run ppt:build && electron-vite build",
     "icons:generate": "node scripts/generate-app-icons.mjs",
     "preview": "electron-vite preview",
     "mock:enterprise": "node scripts/mock-bisheng-enterprise.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:windows": "vitest run --config vitest.windows.config.ts",
-    "pretest:windows": "npm run office:prepare && npm run ppt:build",
+    "pretest:windows": "npm run ppt:build",
     "test:watch": "vitest",
     "package:dir": "npm run build && electron-builder --dir",
     "package:dev:dir": "npm run build && electron-builder --dir --config electron-builder.dev.cjs",
@@ -45,10 +45,11 @@
     "package:win": "node scripts/verify-target.mjs win32 x64 && npm run build && node scripts/electron-builder-windows.mjs --win --x64 --publish never",
     "package:win:unpacked": "node scripts/verify-target.mjs win32 x64 && npm run build && node scripts/electron-builder-windows.mjs --win --x64 --dir --publish never",
     "ppt:build": "node scripts/prepare-ppt-runtime.mjs",
-    "pretest": "npm run office:prepare && npm run ppt:build",
-    "pretest:watch": "npm run office:prepare && npm run ppt:build",
+    "pretest": "npm run reference-icons:prepare && npm run office:prepare && npm run ppt:build",
+    "pretest:watch": "npm run reference-icons:prepare && npm run office:prepare && npm run ppt:build",
     "office:prepare": "node scripts/office-runtime/prepare.mjs && node scripts/office-runtime/prepare-templates.mjs",
-    "loader:generate": "node scripts/generate-loader-gifs.mjs"
+    "loader:generate": "node scripts/generate-loader-gifs.mjs",
+    "reference-icons:prepare": "node scripts/prepare-reference-icons.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.5",
@@ -280,6 +281,7 @@
     "@deepseek-ai/schemastery": "3.18.5",
     "dsh-desktop-client-ui": "file:packages/dsh-desktop-client-ui",
     "dsh-desktop-enterprise": "file:packages/dsh-desktop-enterprise",
+    "dsh-desktop-settings": "file:packages/dsh-desktop-settings",
     "dsh-desktop-hmr-fallback": "file:packages/dsh-desktop-hmr-fallback",
     "dsh-desktop-log-bridge": "file:packages/dsh-desktop-log-bridge",
     "dsh-desktop-market-installer": "file:packages/dsh-desktop-market-installer",

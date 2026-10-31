@@ -1,3 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { CONTENT_SAFETY_ERROR_COPY } from './error-copy.js'
+import { createContentSafetyLocaleScope } from './content-safety-locale.js'
+import { applyEnterpriseSkills } from './work-skills.js'
+import { applyWorkResources } from './work-resources.js'
+import { applyWorkCapabilities } from './work-capabilities.js'
 import { requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import { applyEnterpriseMarket } from './market.js'
 import { applyEnterpriseWorkbenchMarket } from './workbench-market.js'
@@ -25,6 +31,7 @@ const LOCAL_PATHS = Object.freeze({
   inspectDeepLink: '/api/enterprise.deep-link.inspect',
   confirmDeepLink: '/api/enterprise.deep-link.confirm',
   refresh: '/api/enterprise.refresh',
+  refreshModels: '/api/enterprise.models.refresh',
   logout: '/api/enterprise.logout'
 })
 
@@ -69,11 +76,15 @@ function brokerConfig() {
   const capability = process.env.DSH_DESKTOP_ENTERPRISE_BROKER_CAPABILITY
   // Consume the owner secret before any market plugin is imported. This is not a Node sandbox.
   delete process.env.DSH_DESKTOP_ENTERPRISE_BROKER_CAPABILITY
-  if (!urlValue || !capability) return undefined
+  if (!urlValue || !capability) {
+    console.warn('[enterprise] broker configuration missing', { urlConfigured: Boolean(urlValue), capabilityConfigured: Boolean(capability) })
+    return undefined
+  }
   let url
   try {
     url = new URL(urlValue)
   } catch {
+    console.warn('[enterprise] broker URL is invalid')
     return undefined
   }
   if (
@@ -84,6 +95,7 @@ function brokerConfig() {
     || url.search
     || url.hash
   ) {
+    console.warn('[enterprise] broker URL must be an HTTP loopback origin without credentials, query or hash')
     return undefined
   }
   return { origin: url.origin, capability }
@@ -143,6 +155,7 @@ async function brokerChat(broker, body, signal, attribution, connectionKey) {
     })
   } catch (error) {
     if (signal?.aborted) throw error
+    console.warn('[enterprise] broker model request failed', error)
     unavailable()
   }
   return response
@@ -153,8 +166,8 @@ async function requestBrokerJson(broker, path, body, signal) {
   let response
   try {
     response = await fetch(new URL(path, `${broker.origin}/`), {
-      ...(signal ? { signal } : {}),
       method: body === undefined ? 'GET' : 'POST',
+      signal,
       redirect: 'error',
       headers: {
         authorization: `Bearer ${broker.capability}`,
@@ -162,8 +175,9 @@ async function requestBrokerJson(broker, path, body, signal) {
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     })
-  } catch {
+  } catch (error) {
     signal?.throwIfAborted()
+    console.warn('[enterprise] broker request failed', { path }, error)
     unavailable()
   }
   const payload = await response.json().catch(() => ({}))
@@ -184,6 +198,9 @@ export function apply(ctx) {
   let workbenches
   let capabilityPolicy
   let account = disabledState()
+  let workSkills
+  let workResources
+  let workCapabilities
   let ingestEnterpriseState = () => undefined
   const thirdPartyFlags = () => {
     const snap = capabilityPolicy?.snapshot()
@@ -200,6 +217,7 @@ export function apply(ctx) {
       await workbenches?.stop()
       capabilityPolicy?.reset()
     }
+    if (!state.connected || account.connectionKey !== state.connectionKey) { workResources?.clear(); workSkills?.clear(); workCapabilities?.clear() }
     account = state
     if (!state.connected) capabilityPolicy?.reset()
     else void capabilityPolicy?.refresh(state.connectionKey).catch(() => undefined)
@@ -221,6 +239,28 @@ export function apply(ctx) {
     }
     return binary ? Buffer.from(await response.arrayBuffer()) : response.json()
   }
+  if (typeof ctx.inject === 'function') ctx.inject(['tools', 'sessions', 'systemPrompt'], scoped => { workResources = applyWorkResources(scoped, {
+    state: () => account, refreshState: readBrokerState,
+    request: (body, signal) => brokerJson('/v1/work-resources', body, signal)
+  }) })
+  if (typeof ctx.inject === 'function') ctx.inject(['skills'], scoped => { workSkills = applyEnterpriseSkills(scoped, {
+    state: () => account, refreshState: readBrokerState,
+    request: async (body, signal) => {
+      if (!broker) unavailable()
+      const response = await fetch(new URL('/v1/work-skills', broker.origin), {
+        method: 'POST', redirect: 'error', signal,
+        headers: { authorization: `Bearer ${broker.capability}`, 'content-type': 'application/json' }, body: JSON.stringify(body)
+      })
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `Skill request failed (${response.status}).`)
+      return body.operation === 'bundle' ? Buffer.from(await response.arrayBuffer()) : response.json()
+    }
+  }) })
+  if (typeof ctx.inject === 'function') ctx.inject(['tools', 'sessions'], scoped => {
+    workCapabilities = applyWorkCapabilities(scoped, {
+      state: () => account, refreshState: readBrokerState,
+      request: (body, signal) => brokerJson('/v1/work-mcp', body, signal)
+    })
+  })
   const verifyWorkbenchArtifact = async (input) => {
     if (!broker) unavailable()
     const response = await fetch(new URL('/v1/workbench/verify', broker.origin), {
@@ -337,6 +377,7 @@ export function apply(ctx) {
   registerJsonRoute(connection, LOCAL_PATHS.manual, ['POST'], async (request) => {
     const body = await readJson(request)
     const state = await brokerJson('/v1/login/manual', { identityTicket: String(body?.identityTicket ?? '') })
+    if (!state.connected || account.connectionKey !== state.connectionKey) { workResources?.clear(); workSkills?.clear(); workCapabilities?.clear() }
     account = state
     ingestEnterpriseState(state)
     if (state.connected) await capabilityPolicy?.refresh(state.connectionKey).catch(() => undefined)
@@ -354,6 +395,13 @@ export function apply(ctx) {
       ...(body?.confirmInsecurePrivateHttp === true ? { confirmInsecurePrivateHttp: true } : {})
     })
   })
+  registerJsonRoute(connection, LOCAL_PATHS.refreshModels, ['POST'], async (request) => {
+    await readJson(request)
+    if (!broker) return disabledState()
+    const state = await brokerJson('/v1/models/refresh', {})
+    ingestEnterpriseState(state)
+    return state
+  })
   registerJsonRoute(connection, LOCAL_PATHS.refresh, ['POST'], async (request) => {
     await readJson(request)
     if (!broker) return disabledState()
@@ -368,6 +416,7 @@ export function apply(ctx) {
     await market.stop()
     await workbenches?.stop()
     capabilityPolicy?.reset()
+    if (!state.connected || account.connectionKey !== state.connectionKey) { workResources?.clear(); workSkills?.clear(); workCapabilities?.clear() }
     account = state
     ingestEnterpriseState(state)
     return { ...state, allowThirdPartyPlugins: false, allowThirdPartyWorkbenches: false }
@@ -382,7 +431,39 @@ export function apply(ctx) {
   }
 }
 
+function contentSafetyLocale(request) {
+  const authority = request.headers.host
+  const cookie = request.headers.cookie
+  if (typeof authority !== 'string' || typeof cookie !== 'string') return undefined
+  const name = 'dshEnterpriseSafetyLocale_' + encodeURIComponent(authority.toLowerCase())
+  const values = cookie.split(';').map(part => part.trim()).filter(part => part.startsWith(name + '='))
+  if (values.length !== 1) return undefined
+  const value = values[0].slice(name.length + 1)
+  if (value.length > 2048) return undefined
+  try {
+    const payload = JSON.parse(decodeURIComponent(value))
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+      || Object.keys(payload).length !== 2 || !Object.hasOwn(payload, 'messages')
+      || typeof payload.owner !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.owner)) return undefined
+    const messages = payload.messages
+    const codes = Object.keys(CONTENT_SAFETY_ERROR_COPY)
+    if (!messages || typeof messages !== 'object' || Array.isArray(messages)
+      || Object.keys(messages).length !== codes.length
+      || !codes.every(code => typeof messages[code] === 'string'
+        && Object.values(CONTENT_SAFETY_ERROR_COPY[code]).includes(messages[code]))) return undefined
+    return Object.freeze(messages)
+  } catch {
+    // Locale is an optional display hint, never an authentication or model input.
+    return undefined
+  }
+}
+
 function startEnterpriseLlm(ctx, llm, broker) {
+  const safetyLocale = new AsyncLocalStorage()
+  const disposeSafetyLocale = ctx.on('connection/request', (request, _response, next) =>
+    safetyLocale.run(contentSafetyLocale(request), next))
+  const safetyLocaleScope = createContentSafetyLocaleScope(ctx, () => safetyLocale.getStore())
   let latest = disabledState()
   let models = []
   let modelsAvailable = false
@@ -426,6 +507,7 @@ function startEnterpriseLlm(ctx, llm, broker) {
     request: (body, signal, headers) => brokerChat(broker, body, signal, pickAttributionHeaders(headers)),
     requestResponses: (body, signal, headers, connectionKey) => brokerChat(broker, body, signal, pickAttributionHeaders(headers), connectionKey),
     connectionKey: () => latest.connectionKey,
+    contentSafetyFormatterFor: options => safetyLocaleScope.formatterFor(options),
     onReplayDegrade: (reason) => ctx.logger?.info?.(`Enterprise Responses replay degraded: ${reason}`),
     readImage: (ref, signal) => ctx.get?.('attachments')?.readImageRequest?.(ref, {
       ...requestImageDimensions(ref.width, ref.height, 4_194_304),
@@ -476,6 +558,9 @@ function startEnterpriseLlm(ctx, llm, broker) {
     },
     dispose() {
       stopped = true
+      disposeSafetyLocale()
+      safetyLocaleScope.dispose()
+      safetyLocale.disable()
       titles.dispose()
       if (timer) clearTimeout(timer)
       registration?.()

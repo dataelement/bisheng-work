@@ -88,8 +88,8 @@ export const ACCOUNT_ERROR_COPY = Object.freeze({
     en: 'This sign-in authorization failed. Start sign-in again.'
   },
   network_error: {
-    zh: '无法连接毕昇平台，请检查地址和网络。',
-    en: 'Could not reach the BiSheng platform. Check the service address and your network.'
+    zh: '无法连接企业平台，请检查地址和网络。',
+    en: 'Could not reach the enterprise platform. Check the service address and your network.'
   },
   invalid_response: {
     zh: '平台响应异常，请检查服务地址或联系管理员。',
@@ -180,4 +180,38 @@ export function resolveAccountError(code, message) {
   }
   if (accountMessageLooksLikeHtml(text)) return { code: 'invalid_response' }
   return { message: sanitizeAccountMessage(text) }
+}
+
+
+export const CONTENT_SAFETY_ERROR_COPY = Object.freeze({
+  CONTENT_FILTERED: Object.freeze({
+    zh: '内容包含敏感词，本次请求已停止。',
+    en: 'This request was stopped because sensitive words were detected.',
+    ja: '制限された語句が検出されたため、このリクエストを停止しました。'
+  }),
+  CONTENT_CHECK_UNAVAILABLE: Object.freeze({
+    zh: '暂时无法检查内容，请稍后重试。',
+    en: 'Content checking is temporarily unavailable. Try again later.',
+    ja: '現在、コンテンツを確認できません。しばらくしてから再試行してください。'
+  })
+})
+
+const CONTENT_SAFETY_ALIASES = Object.freeze({
+  content_blocked: 'CONTENT_FILTERED',
+  content_filter: 'CONTENT_FILTERED',
+  content_filtered: 'CONTENT_FILTERED',
+  check_unavailable: 'CONTENT_CHECK_UNAVAILABLE',
+  content_check_unavailable: 'CONTENT_CHECK_UNAVAILABLE'
+})
+
+/** Normalize explicit safety signals without changing account or quota failures. */
+export function resolveContentSafetyError(code, message) {
+  if (typeof code !== 'string') return null
+  const key = code.trim().toLowerCase()
+  if (!Object.hasOwn(CONTENT_SAFETY_ALIASES, key)) return null
+  const result = { code: CONTENT_SAFETY_ALIASES[key] }
+  // Tenant replies are display text, never dictionary keys or HTML error pages.
+  if (typeof message !== 'string' || accountMessageLooksLikeHtml(message)) return result
+  const safeMessage = sanitizeAccountMessage(message)
+  return safeMessage ? { ...result, message: safeMessage } : result
 }

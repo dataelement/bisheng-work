@@ -8,6 +8,50 @@ import {
   type PendingCreatedSession
 } from '../src/main/mobile/lan-mobile-pages'
 
+interface PairingPageApi {
+  poll(): Promise<void>
+  switchMode(enabled: boolean): Promise<void>
+  state(): { pairingUrl: string; tunnelActive: boolean; pinConsent: boolean }
+}
+
+async function runPairingPage(
+  locale: 'en' | 'zh',
+  fetch: (input: string) => Promise<{ ok: boolean; json(): Promise<unknown> }>,
+  reload: () => void
+): Promise<PairingPageApi> {
+  const html = renderDesktopPairingPage({
+    qrSvg: '<svg></svg>',
+    pairingUrl: 'http://192.168.1.2/pair?token=test',
+    expiresAt: Date.now() + 60_000,
+    locale,
+    connected: false,
+    pinConsent: true
+  })
+  const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
+  if (!script) throw new Error('Pairing page is missing its script')
+  const element = () => ({
+    classList: { add() {}, remove() {}, toggle() {} },
+    style: { width: '' },
+    textContent: '',
+    hidden: false,
+    checked: false,
+    disabled: false,
+    innerHTML: ''
+  })
+  const run = new Function(
+    'document', 'fetch', 'location', 'setInterval', 'clearInterval', 'setTimeout',
+    `return (async()=>{${script};await poll();return {poll,switchMode,state:()=>({pairingUrl,tunnelActive,pinConsent})}})()`
+  )
+  return run(
+    { body: element(), getElementById: element },
+    fetch,
+    { reload },
+    () => 0,
+    () => undefined,
+    (callback: () => void) => { callback(); return 0 }
+  ) as Promise<PairingPageApi>
+}
+
 describe('LAN mobile page', () => {
   it('emits parseable browser JavaScript', () => {
     const html = renderMobilePage({ locale: 'zh' })
@@ -551,6 +595,69 @@ describe('LAN mobile page', () => {
     expect(phone).toContain('输入连接密码')
     expect(phone).toContain('在电脑上查看密码')
     expect(phone).toContain('暂时无法连接桌面端，请先启动 BISHENG。')
+  })
+
+  it.each(['en', 'zh'] as const)('refreshes an open %s pairing page only for a supported changed locale', async (locale) => {
+    let reportedLocale: unknown = locale
+    let reloads = 0
+    const api = await runPairingPage(locale, async (input) => ({
+      ok: true,
+      json: async () => input === '/desktop/status'
+        ? { connected: false, locale: reportedLocale }
+        : { active: false, pinConsent: true }
+    }), () => { reloads += 1 })
+
+    for (const unchanged of [undefined, null, 'auto', 'fr', { locale: 'zh' }, locale]) {
+      reportedLocale = unchanged
+      await api.poll()
+      expect(reloads).toBe(0)
+    }
+    reportedLocale = locale === 'en' ? 'zh' : 'en'
+    await api.poll()
+    expect(reloads).toBe(1)
+    expect(api.state()).toEqual({
+      pairingUrl: 'http://192.168.1.2/pair?token=test',
+      tunnelActive: false,
+      pinConsent: true
+    })
+  })
+
+  it('defers a locale refresh until an in-flight mode switch finishes', async () => {
+    let reportedLocale = 'en'
+    let reloads = 0
+    let completeSwitch: ((value: object) => void) | undefined
+    const switched = new Promise<object>((resolve) => { completeSwitch = resolve })
+    const api = await runPairingPage('en', async (input) => ({
+      ok: true,
+      json: async () => input === '/desktop/status'
+        ? { connected: false, locale: reportedLocale }
+        : input === '/desktop/tunnel/toggle'
+          ? switched
+          : { active: false, pinConsent: true }
+    }), () => { reloads += 1 })
+
+    const switching = api.switchMode(true)
+    reportedLocale = 'zh'
+    await api.poll()
+    expect(reloads).toBe(0)
+    if (!completeSwitch) throw new Error('Mode switch was not initialized')
+    completeSwitch({
+      ok: true,
+      active: true,
+      pairingUrl: 'https://example.trycloudflare.com/pair?token=test',
+      pairingPin: '123456',
+      pinConsent: true
+    })
+    await switching
+    expect(reloads).toBe(0)
+    expect(api.state()).toEqual({
+      pairingUrl: 'https://example.trycloudflare.com/pair?token=test',
+      tunnelActive: true,
+      pinConsent: true
+    })
+    await api.poll()
+    expect(reloads).toBe(1)
+    expect(api.state().tunnelActive).toBe(true)
   })
 
   it('renders the temporary pin hint with remaining seconds from one helper', () => {

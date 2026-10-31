@@ -37,14 +37,34 @@ export function officeCliTimedOut(error) {
   return Boolean(error && typeof error === 'object' && error.killed === true && error.signal === 'SIGTERM')
 }
 
-/** Retry only a Kit timeout or the outer process kill. Other failures stop immediately. */
+function commandErrorText(error) {
+  const stderrValue = error && typeof error === 'object' && 'stderr' in error ? error.stderr : ''
+  const stderr = Buffer.isBuffer(stderrValue) ? stderrValue.toString('utf8') : typeof stderrValue === 'string' ? stderrValue : ''
+  const message = error instanceof Error ? error.message : ''
+  return `${stderr}\n${message}`
+}
+
+/**
+ * Electron worker threads on the Rosetta Intel runner sometimes fail to stat
+ * `unicode-properties` while resolving fontkit, after the parent thread in the
+ * same process has already loaded it. A new process succeeds.
+ */
+export function officeCliRetriable(error) {
+  if (officeCliTimedOut(error)) return true
+  const text = commandErrorText(error)
+  return text.includes("Cannot find package 'unicode-properties'") &&
+    text.includes('node_modules/fontkit/dist/module.mjs')
+}
+
+/** Retry a Kit timeout, the outer process kill, or a transient worker module lookup. Other failures stop immediately. */
 export async function runOfficeCli(label, run, attempts = officeCliAttempts) {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       return await run()
     } catch (error) {
-      if (attempt === attempts || !officeCliTimedOut(error)) throw error
-      console.log(`Office ${label} timed out, retrying (${attempt + 1}/${attempts})`)
+      if (attempt === attempts || !officeCliRetriable(error)) throw error
+      const reason = officeCliTimedOut(error) ? 'timed out' : 'could not resolve a worker module'
+      console.log(`Office ${label} ${reason}, retrying (${attempt + 1}/${attempts})`)
     }
   }
 }

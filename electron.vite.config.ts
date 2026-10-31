@@ -18,7 +18,8 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('src/preload/index.ts')
+          index: resolve('src/preload/index.ts'),
+          'enterprise-chat': resolve('src/preload/enterprise-chat.ts')
         },
         output: {
           format: 'cjs',

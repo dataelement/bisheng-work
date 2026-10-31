@@ -19,13 +19,15 @@ describe('Safe Mode resolves plugins from the installation', () => {
       create: vi.fn(async () => 'include'),
       resolve: vi.fn(() => ({}))
     }
-    const ctx = { loader, get: (name: string) => name === 'loader' ? loader : undefined }
+    const ctx = { loader, provide: vi.fn(), get: (name: string) => name === 'loader' ? loader : undefined }
     return { ctx, loader, internalImport, configImport }
   }
 
   it('routes runtime-created entries to the host base, not the profile directory', async () => {
     const { ctx, loader, internalImport, configImport } = fakeContext()
     await mountRootInclude(ctx as never, '/home/profiles/desktop-safe-mode/cordis.yml', [], 'file:///app/dsh/package.json')
+
+    expect(ctx.provide).not.toHaveBeenCalled()
 
     // Runtime children inherit the host-resolved root Include's import policy.
     const HostResolvedRootInclude = loader.builtins.include as { prototype: { import(name: string, stack: () => string): Promise<unknown> } }

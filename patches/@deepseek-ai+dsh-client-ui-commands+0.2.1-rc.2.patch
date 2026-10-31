@@ -1,0 +1,27 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-commands/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-commands/lib/client.js
+index 111d8aa..688ce79 100644
+--- a/node_modules/@deepseek-ai/dsh-client-ui-commands/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-commands/lib/client.js
+@@ -1954,6 +1954,9 @@ window.__ModuleLoader__.load({
+ 						children: [(0, react_jsx_runtime.jsx)("span", {
+ 							className: PopupSelectView_module_css_default.labelText,
+ 							children: option.label
++						}), option.badgeIcon !== void 0 && (0, react_jsx_runtime.jsx)("span", {
++							style: { display: "inline-flex", alignSelf: "center", flex: "none", color: "var(--dsw-alias-label-tertiary)" },
++							children: (0, react_jsx_runtime.jsx)(option.badgeIcon, { "aria-hidden": true })
+ 						}), option.badge !== void 0 && (0, react_jsx_runtime.jsx)("sup", {
+ 							className: PopupSelectView_module_css_default.badge,
+ 							children: option.badge
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-commands/lib/types/client/contract.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-commands/lib/types/client/contract.d.ts
+index 93cd2d4..cc4596f 100644
+--- a/node_modules/@deepseek-ai/dsh-client-ui-commands/lib/types/client/contract.d.ts
++++ b/node_modules/@deepseek-ai/dsh-client-ui-commands/lib/types/client/contract.d.ts
+@@ -28,6 +28,8 @@ export interface SelectOption {
+     readonly label: string;
+     /** Optional short marker rendered as a superscript beside the label. */
+     readonly badge?: string;
++    /** Optional decorative marker supplied by the option owner beside the label. */
++    readonly badgeIcon?: ComponentType<IconProps>;
+     readonly detail?: string;
+     /** Equal group names share a sticky heading; groups retain first-occurrence order. */
+     readonly group?: SelectOptionGroup;

@@ -7,8 +7,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
-import { Loader } from '@deepseek-ai/cordis-plugin-loader'
-import { createMarketRuntime } from '../packages/dsh-desktop-enterprise/market-runtime.js'
 import { applyEnterpriseMarket, createMarketController, hostDshEntryPath, isMarketVersionCompatible } from '../packages/dsh-desktop-enterprise/market.js'
 import { installOfflineBundle, readBundleZip, sha256, validateOfflineBundle, verifyInstalledBundle } from '../packages/dsh-desktop-enterprise/offline-bundle.js'
 import { acceptMarketSnapshot } from '../packages/dsh-desktop-enterprise/market-policy.js'
@@ -16,7 +14,23 @@ import { sweepRegistry } from 'dsh-desktop-market-installer/generations/registry
 import { zipEntries } from '../scripts/pack-enterprise-plugin.mjs'
 
 const paths: string[] = [], controllers: Array<{ stop: () => Promise<void> }> = []
-afterEach(async () => { for (const controller of controllers.splice(0)) await controller.stop(); for (const path of paths.splice(0)) await rm(path, { recursive: true, force: true }); vi.useRealTimers() })
+async function removeTemporary(path: string) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rm(path, { recursive: true, force: true })
+      return
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+      if (attempt >= 4 || (code !== 'ENOTEMPTY' && code !== 'EBUSY' && code !== 'EPERM')) throw error
+      await new Promise(resolve => setTimeout(resolve, 200 * (attempt + 1)))
+    }
+  }
+}
+afterEach(async () => {
+  for (const controller of controllers.splice(0)) await controller.stop()
+  for (const path of paths.splice(0)) await removeTemporary(path)
+  vi.useRealTimers()
+}, 120_000)
 const pluginId = 'a'.repeat(32), versionId = 'b'.repeat(32), target = `${process.platform}-${process.arch}`
 const account = { connected: true, desktopVersion: '0.9.2', base: 'https://enterprise.example/bisheng', user: { id: '20' }, tenant: { id: '2', name: 'Company' }, sessionExpiresAt: new Date(Date.now() + 86400000).toISOString() }
 function bundle(version = '1.0.0', source = 'export function apply(ctx) { ctx.effect(() => () => {}, "test plugin") }') {
@@ -75,23 +89,12 @@ describe('offline bundles', () => {
     expect(plugin.apply).toBeTypeOf('function')
   })
 
-  it('registers the real host Loader entry and removes it when the enterprise plugin stops', async () => {
-    const root = await home(), data = bundle()
-    const generation = await installOfflineBundle(root, data.bytes, data.expected, target)
-    const context = new Context()
-    const loaderFiber = context.plugin(Loader, { baseUrl: pathToFileURL(`${root}/`).href })
-    await loaderFiber
-    let runtime: ReturnType<typeof createMarketRuntime> | undefined
-    context.loader.builtins.enterpriseTest = { apply(child: Context) { runtime = createMarketRuntime(child) } }
-    const ownerId = await context.loader.create({ name: 'cordis:enterpriseTest' })
-    await context.loader.await()
-    try {
-      const mounted = await runtime!({ ...generation, ...data.expected, plugin_id: 'fixture-plugin' })
-      expect([...context.loader.entries()].some(entry => entry.options.name.includes('company-demo/index.js'))).toBe(true)
-      expect(mounted.state).toBe(2)
-      await mounted.dispose()
-      expect([...context.loader.entries()].some(entry => entry.options.name.includes('company-demo/index.js'))).toBe(false)
-    } finally { await context.loader.remove(ownerId); await loaderFiber.dispose() }
+  it('uses native root composition and ESM resolution with revocable instance credentials', async () => {
+    const root = await home()
+    const { stdout } = await promisify(execFile)(process.execPath, ['--expose-internals', join(process.cwd(), 'test/helpers/enterprise-root-smoke.mjs'), root], {
+      cwd: root, env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '' }, timeout: 30000
+    })
+    expect(stdout.trim()).toBe('PASS')
   })
   it('installs a verified generation without package manager or network access', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network forbidden'))
@@ -404,17 +407,23 @@ describe('review regressions', () => {
 })
 
  it('loads its declared closure from a physical isolated Profile and exercises the real Loader lifecycle', async () => {
-   const root = await home()
+   // Keep the 22k-file closure on the checkout volume. %TEMP% on Windows CI is
+   // another drive, and a cross-volume copy does not finish inside the default timeout.
+   const parent = join(process.cwd(), '.build', 'enterprise-market-tests')
+   await mkdir(parent, { recursive: true })
+   const root = await mkdtemp(join(parent, 'closure-'))
+   paths.push(root)
+   await mkdir(join(root, 'profiles/node_modules'), { recursive: true })
    const isolated = await isolatePackage(join(process.cwd(), 'packages/dsh-desktop-enterprise'), join(root, 'installation'))
    const good = bundle(), bad = bundle('1.1.0', 'export function apply() { throw new Error("smoke bad update") }')
    const fixtureFile = join(root, 'fixtures.json')
    const shape = (value: ReturnType<typeof bundle>, id: string) => ({ ...value.expected, id, bytes: value.bytes.toString('base64'), manifest: value.manifest })
    await writeFile(fixtureFile, JSON.stringify({ pluginId, good: shape(good, versionId), bad: shape(bad, 'c'.repeat(32)) }))
-   const { stdout } = await promisify(execFile)(process.execPath, [join(process.cwd(), 'test/helpers/enterprise-profile-smoke.mjs'), isolated.entry, root, fixtureFile], {
-     cwd: root, env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '' }, timeout: 30000
+   const { stdout } = await promisify(execFile)(process.execPath, ['--expose-internals', join(process.cwd(), 'test/helpers/enterprise-profile-smoke.mjs'), isolated.entry, root, fixtureFile], {
+     cwd: root, env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '' }, timeout: 90000
    })
-   expect(JSON.parse(stdout)).toMatchObject({ isolatedImport: 'PASS', install: 'PASS', disableEnable: 'PASS', failedUpdateRollback: 'PASS', stop: 'PASS' })
- })
+   expect(JSON.parse(stdout)).toMatchObject({ isolatedImport: 'PASS', managerLifecycle: 'PASS', install: 'PASS', disableEnable: 'PASS', failedUpdateRollback: 'PASS', stop: 'PASS' })
+ }, 180_000)
 
  it('blocks installs below the actual Desktop minimum and exposes the same verdict to the list', async () => {
    const { market, setDesktopVersion } = await fixture()

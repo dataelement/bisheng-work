@@ -95,6 +95,7 @@ export function createGenerationPackageBackend(options) {
   } = options
 
   return Object.freeze({
+    supportsVerifiedInstall: true,
     async install(request) {
       const log = await createOperationLog(dshHome)
       let activeChild

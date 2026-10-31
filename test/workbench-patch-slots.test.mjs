@@ -56,14 +56,15 @@ describe('rc.2 workbench patch slots', () => {
     }
     sidebar.apply(ctx)
     const shell = registrations.find(item => item.options.name === 'sidebar')
+    expect(shell.options.children['sidebar.primaryNavigation']).toEqual({ kind: 'single', scope: 'root' })
     expect(shell.options.children['sidebar.quickSwitcher']).toEqual({ kind: 'single', scope: 'root' })
     const rendered = []
     const markup = renderToStaticMarkup(React.createElement(shell.Component, {
       collapsed: false, width: 250, startSession, toggleSidebar: () => {}, selectPanel: () => {},
       usePanels: () => [{ id: 'plugins', label: '插件' }], useShortcuts: () => [], usePanelInfo: () => ({}), t: key => key,
-      renderSlot: (name, owner) => {
+      renderSlot: (name, owner, options) => {
         rendered.push({ name, owner })
-        return name === 'sidebar.quickSwitcher' ? React.createElement('span', null, 'Workbench switcher') : null
+        return name === 'sidebar.quickSwitcher' ? React.createElement('span', null, 'Workbench switcher') : options?.fallback ?? null
       }
     }))
     expect(markup).toContain('Workbench switcher')
@@ -71,6 +72,23 @@ describe('rc.2 workbench patch slots', () => {
     expect(markup.indexOf('Workbench switcher')).toBeLessThan(markup.indexOf('class="hHd-Xa_panelList"'))
     expect(rendered.find(item => item.name === 'sidebar.quickSwitcher')?.owner).toEqual({ wide: true, startSession })
     expect(rendered.findIndex(item => item.name === 'sidebar.quickSwitcher')).toBeGreaterThan(-1)
+    const primary = rendered.find(item => item.name === 'sidebar.primaryNavigation').owner
+    expect(primary.panels).toEqual([{ id: 'plugins', label: '插件' }])
+    expect(primary.startSession).toBe(startSession)
+    const customized = renderToStaticMarkup(React.createElement(shell.Component, {
+      collapsed: false, width: 250, startSession, toggleSidebar: () => {}, selectPanel: () => {},
+      usePanels: () => [{ id: 'plugins', label: 'Plugins' }, { id: 'custom', label: 'A long third-party panel name' }],
+      useShortcuts: () => [], usePanelInfo: () => ({}), t: key => key,
+      renderSlot: (name, owner, options) => name === 'sidebar.primaryNavigation'
+        ? React.createElement('nav', null, owner.panels.map(panel => React.createElement('button', { key: panel.id }, panel.label)))
+        : options?.fallback ?? null
+    }))
+    expect(customized).toContain('A long third-party panel name')
+    expect(customized.match(/>Plugins</g)).toHaveLength(1)
+    expect(customized.match(/class="hHd-Xa_newSession"/g)).toHaveLength(1)
+    const action = renderToStaticMarkup(primary.renderAction({ id: 'more', label: 'More', icon: null, expanded: true, active: true, onClick: () => {} }))
+    expect(action).toContain('hHd-Xa_panelRow hHd-Xa_panelActive')
+    expect(action).toContain('aria-expanded="true"')
   })
 
   it('isolates a failed optional workbench without hiding a failed core entry', async () => {

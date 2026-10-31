@@ -6,7 +6,7 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
 
     const React = require('react')
-    const { useCallback, useEffect, useRef, useState } = React
+    const { useCallback, useEffect, useLayoutEffect, useRef, useState } = React
     const { Button, Modal, IconGlobeOutlineRegular } = require('@deepseek-ai/dsh-client-ui-primitives')
 
     const NS = 'desktop-onboarding'
@@ -216,8 +216,8 @@ window.__ModuleLoader__.load({
 
       const visible = decision === 'show'
 
-      // Keep the application behind the dialog inert, like the stock notice.
-      useEffect(() => {
+      // Establish the modal boundary before native content is presented.
+      useLayoutEffect(() => {
         if (!visible) return
         const appRoot = document.getElementById('root')
         if (appRoot === null) return

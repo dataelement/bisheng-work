@@ -16,6 +16,7 @@ const JSON_ROUTES = new Map<string, 'GET' | 'POST'>([
   ['/v1/login/start', 'POST'],
   ['/v1/login/manual', 'POST'],
   ['/v1/refresh', 'POST'],
+  ['/v1/models/refresh', 'POST'],
   ['/v1/logout', 'POST'],
   ['/v1/chat', 'POST'],
   ['/v1/responses', 'POST'],
@@ -23,7 +24,10 @@ const JSON_ROUTES = new Map<string, 'GET' | 'POST'>([
   ['/v1/market', 'POST'],
   ['/v1/workbench/verify', 'POST'],
   ['/v1/workbench/materialize', 'POST'],
-  ['/v1/workbench/release', 'POST']
+  ['/v1/workbench/release', 'POST'],
+  ['/v1/work-resources', 'POST'],
+  ['/v1/work-skills', 'POST'],
+  ['/v1/work-mcp', 'POST']
 ])
 
 export interface EnterpriseCredentialBroker {
@@ -129,6 +133,28 @@ export async function startEnterpriseCredentialBroker(
         finally { request.off('aborted', abort); response.off('close', abort) }
         return
       }
+      if (path === '/v1/work-skills') {
+        const controller = new AbortController()
+        const abort = () => { if (!response.writableFinished) controller.abort() }
+        request.on('aborted', abort)
+        response.on('close', abort)
+        try {
+          const result = await service.workSkills(body, controller.signal)
+          response.writeHead(200, { 'content-type': result.binary ? 'application/zip' : 'application/json', 'cache-control': 'no-store' })
+          response.end(result.bytes)
+        } finally { request.off('aborted', abort); response.off('close', abort) }
+        return
+      }
+      if (path === '/v1/work-resources' || path === '/v1/work-mcp') {
+        const controller = new AbortController()
+        const abort = () => { if (!response.writableFinished) controller.abort() }
+        request.on('aborted', abort)
+        response.on('close', abort)
+        try { sendJson(response, 200, await (path === '/v1/work-mcp'
+          ? service.workMcp(body, controller.signal) : service.workResources(body, controller.signal))) }
+        finally { request.off('aborted', abort); response.off('close', abort) }
+        return
+      }
       if (path === '/v1/market') {
         const result = await service.marketRequest(body)
         response.writeHead(200, { 'content-type': result.binary ? 'application/octet-stream' : 'application/json', 'cache-control': 'no-store' })
@@ -189,7 +215,7 @@ export async function startEnterpriseCredentialBroker(
         sendJson(response, 200, await service.submitManualTicket(body.identityTicket))
         return
       }
-      if (path === '/v1/refresh') {
+      if (path === '/v1/refresh' || path === '/v1/models/refresh') {
         if (!refreshLimit.allow()) {
           sendJson(response, 429, { error: 'Too many refresh attempts.' })
           return
@@ -198,7 +224,7 @@ export async function startEnterpriseCredentialBroker(
           sendJson(response, 400, { error: 'Refresh does not accept a body.' })
           return
         }
-        sendJson(response, 200, await service.refresh())
+        sendJson(response, 200, path === '/v1/models/refresh' ? await service.refreshModels() : await service.refresh())
         return
       }
       if (path === '/v1/logout') {

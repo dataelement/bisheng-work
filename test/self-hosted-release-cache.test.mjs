@@ -9,7 +9,7 @@ it('uses local npm downloads and bounds Node setup on persistent release workers
   const persistentJobs = Object.values(jobs).filter(job =>
     Array.isArray(job['runs-on']) && job['runs-on'].includes('self-hosted')
   )
-  expect(persistentJobs).toHaveLength(2)
+  expect(persistentJobs).toHaveLength(3)
   for (const job of persistentJobs) {
     const setup = job.steps.find(step => step.uses?.startsWith('actions/setup-node@'))
     expect(setup).toBeDefined()
@@ -23,6 +23,23 @@ it('uses local npm downloads and bounds Node setup on persistent release workers
   const hostedSetup = jobs['windows-x64'].steps.find(step => step.uses?.startsWith('actions/setup-node@'))
   expect(hostedSetup.with.cache).toBe('npm')
   expect(hostedSetup.with['cache-dependency-path']).toBe('package-lock.json')
+})
+
+it('keeps portable preparation on Linux and macOS work on self-hosted runners', async () => {
+  const source = await readFile(path.resolve(import.meta.dirname, '../.github/workflows/release.yml'), 'utf8')
+  const { jobs } = YAML.parse(source)
+  for (const name of ['validate-dispatch', 'publish', 'publish-prerelease', 'publish-signed']) {
+    expect(jobs[name]['runs-on']).toBe('ubuntu-24.04')
+  }
+  expect(jobs['prepare-shared-runtime-assets']['runs-on']).toEqual(['self-hosted', 'macOS', 'ARM64'])
+  expect(jobs.macos['runs-on']).toBe('${{ matrix.runner }}')
+  for (const target of jobs.macos.strategy.matrix.include) {
+    expect(target.runner).toContain('self-hosted')
+    expect(target.runner).toContain('macOS')
+  }
+  for (const job of Object.values(jobs)) {
+    if (typeof job['runs-on'] === 'string') expect(job['runs-on']).not.toMatch(/^macos-/i)
+  }
 })
 
 it('restores Windows download caches before installing dependencies', async () => {

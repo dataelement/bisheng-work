@@ -72,6 +72,17 @@ describe('model catalog revocation', () => {
     expect(caption(f.directory)).toContain('Name bisheng:2')
   })
 
+  it('updates the selected caption when the administrator renames a stable model route', async () => {
+    const f = fixture(catalogValue([group(enterprise, [{ id: old.model, name: '阿里云百炼 / qwen-max' }])]))
+    await f.directory.load()
+    expect(caption(f.directory)).toContain('阿里云百炼 / qwen-max')
+    f.publish(catalogValue([group(enterprise, [{ id: old.model, name: '阿里云百炼 / 1111' }])]))
+    await f.directory.load()
+    expect(caption(f.directory)).toContain('阿里云百炼 / 1111')
+    expect(f.directory.store.getSnapshot().current).toEqual(old)
+    expect(f.selectModel).toHaveBeenCalledTimes(0)
+  })
+
   it('replaces a revoked session model and uses the replacement reasoning default', async () => {
     const f = fixture()
     f.publish(catalogValue([group(enterprise, [{ id: 'bisheng:3', name: 'Authorized model', reasoning: { defaultEffort: 'low', efforts: [{ id: 'low', name: 'Low' }] } }])]))

@@ -358,7 +358,7 @@ async function mountLocalOpen(initial: {
     document: {
       documentElement: { lang: 'zh-CN', dataset: { platform: 'darwin' } },
       getElementById: () => null,
-      createElement: () => ({ id: '', textContent: '', remove() {} }),
+      createElement: () => ({ id: '', textContent: '', dataset: {}, remove() {} }),
       head: { appendChild() {} }
     }
   })

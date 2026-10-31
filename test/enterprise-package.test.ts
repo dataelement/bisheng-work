@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -48,6 +49,45 @@ describe('DSH Desktop enterprise package', () => {
     }
   })
 
+  it('keeps model information without per-model quotas and uses shared credits for availability', async () => {
+    const client = await readFile(path.join(projectRoot, 'packages/dsh-desktop-enterprise/client.js'), 'utf8')
+    const names = ['modelDisplayParts', 'isModelAvailable', 'renderModelRow']
+    const functions = names.map(name => client.match(new RegExp(`    function ${name}\\([^]*?\\n    \\}`))?.[0])
+    expect(functions.every(Boolean)).toBe(true)
+    const require = createRequire(import.meta.url)
+    const React = require('react') as { createElement: (...args: unknown[]) => unknown }
+    const { renderToStaticMarkup } = require('react-dom/server') as { renderToStaticMarkup: (node: unknown) => string }
+    const render = new Function('h', `${functions.join('\n')}; return renderModelRow`)(React.createElement)
+    const model = { id: 'model', display_name: 'Provider / Model' }
+    for (const remaining of [true, false]) {
+      const html = renderToStaticMarkup(render(model, {
+        modelsAvailable: true,
+        usage: { used: remaining ? 25 : 100, limit: 100, quota_state: 'available' },
+        modelUsage: { model: { used: 0, limit: 100, quota_state: 'available' } }
+      }, 'en', (key: string) => key))
+      expect(html).toContain('>Model</span>')
+      expect(html).toContain('>Provider</span>')
+      expect(html.includes('dshEnterpriseModelStatus')).toBe(remaining)
+      expect(html).not.toContain('progressbar')
+      expect(html).not.toContain('dshEnterpriseModelUsage')
+      expect(html).not.toContain('%')
+    }
+    expect(client).not.toContain('modelUsageProgress')
+    expect(client).not.toContain('modelUsagePercentage')
+    expect(client).not.toContain('.dshEnterpriseModelUsage')
+  })
+
+  it('uses native DSH settings card tokens for enterprise model rows', async () => {
+    const client = await readFile(path.join(projectRoot, 'packages/dsh-desktop-enterprise/client.js'), 'utf8')
+    const row = client.match(/\.dshEnterpriseModels li \{([^}]+)\}/)?.[1]
+    const list = client.match(/\.dshEnterpriseModels \{([^}]+)\}/)?.[1]
+    expect(row).toContain('border: .5px solid var(--dsw-alias-settings-card-stroke);')
+    expect(row).toContain('background: var(--dsw-alias-settings-card-fill);')
+    expect(row).toContain('border-radius: var(--dsw-radius-xl);')
+    expect(row).toContain('padding: 12px 14px;')
+    expect(list).toContain('gap: 8px;')
+  })
+
   it('exports the declared Client bundle for the Harness module loader', async () => {
     const packageJson = JSON.parse(await readFile(
       path.join(projectRoot, 'packages', 'dsh-desktop-enterprise', 'package.json'),
@@ -59,7 +99,7 @@ describe('DSH Desktop enterprise package', () => {
 
     expect(packageJson.dsh?.client).toBeTruthy()
     expect(packageJson.dsh?.client).toMatchObject({
-      inject: ['@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-settings', '@deepseek-ai/dsh-client-ui-settings-plugins']
+      inject: ['@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-settings', '@deepseek-ai/dsh-client-ui-settings-plugins']
     })
     expect(packageJson.exports?.['./client']).toBe('./client.js')
   })
@@ -104,7 +144,7 @@ describe('DSH Desktop enterprise package', () => {
     expect(client).toContain('confirmation && !connected')
   })
 
-  it('keeps sign-in focused and shows model usage with hover percentages', async () => {
+it('keeps sign-in focused and shows unified credits without model quotas', async () => {
     const client = await readFile(
       path.join(projectRoot, 'packages', 'dsh-desktop-enterprise', 'client.js'),
       'utf8'
@@ -126,11 +166,12 @@ describe('DSH Desktop enterprise package', () => {
     expect(client).toContain("ctx.locale.register(NS, { zh, en })")
     expect(client).toContain("const t = ctx.locale.bind(NS)")
     expect(client).toContain("label: () => t('nav')")
-    expect(client).toContain("nav: '企业账号'")
-    expect(client).toContain("nav: 'Enterprise'")
-    expect(client).toContain("title: 'Enterprise account'")
-    expect(client).toContain("platform: '企业服务地址'")
-    expect(client).toContain("platform: 'Enterprise service URL'")
+    expect(client).toContain("nav: '账号与用量'")
+    expect(client).toContain("nav: 'Account and usage'")
+    expect(client).toContain("title: 'Account and usage'")
+    expect(client).toContain("children: { 'desktop.account.usage': { kind: 'single', scope: 'root' } }")
+    expect(client).toContain("platform: '企业平台地址'")
+    expect(client).toContain("platform: 'Enterprise platform URL'")
     expect(client).not.toContain('navigator.language')
     expect(client).not.toContain('copy.manualTitle')
     expect(client).not.toContain('copy.manualHint')
@@ -144,28 +185,10 @@ describe('DSH Desktop enterprise package', () => {
     expect(client).toContain("const userLabel = state?.user?.display_name || state?.user?.username || state?.user?.id || '—'")
     expect(client).not.toContain('state.usage)')
     expect(client).not.toContain("h('div', { className: 'dshEnterpriseCard' }, status, accountContent, errorPanel)")
-    expect(client).toContain("state.modelUsage?.[model.id]")
-    expect(client).toContain('.dshEnterpriseModels li:hover .dshEnterpriseModelUsageValue {')
-    expect(client).toContain('.dshEnterpriseModels li:hover .dshEnterpriseModelUsagePercent {')
-    expect(client).toContain('display: none;')
-    expect(client).toContain('display: inline;')
-    expect(client).toContain("className: 'dshEnterpriseModelUsageValue'")
-    expect(client).toContain("className: 'dshEnterpriseModelUsagePercent'")
-    expect(client).toContain('maximumFractionDigits: 1')
-    const percentageBody = client.match(/function modelUsagePercentage\(usage, language, t\) \{([\s\S]*?)\n    \}/)?.[1]
-    expect(percentageBody).toBeDefined()
-    const formatPercentage = new Function('usage', 'language', 't', 'usageText', percentageBody!)
-    expect(formatPercentage({ used: 10000, limit: 8000 }, 'zh-CN')).toBe('100%')
-    expect(formatPercentage({ used: 4000, limit: 8000 }, 'zh-CN')).toBe('50%')
-    const amountBody = client.match(/function tokenAmount\(value, language\) \{([\s\S]*?)\n    \}/)?.[1]
-    expect(amountBody).toBeDefined()
-    const formatAmount = new Function('value', 'language', amountBody!)
-    expect(formatAmount(3326206, 'zh-CN')).toBe('332.62万')
-    expect(formatAmount(1000000, 'zh-CN')).toBe('100万')
-    expect(formatAmount(0, 'zh-CN')).toBe('0')
-    expect(formatAmount(1, 'zh-CN')).toBe('<0.01万')
-    expect(formatAmount(100, 'zh-CN')).toBe('0.01万')
-    expect(formatAmount(1000000, 'en')).toBe('1M')
+    expect(client).toContain('const usage = state.usage')
+    expect(client).not.toContain('state.modelUsage?.[model.id]')
+    expect(client).toContain("usageLabel: '剩余积分'")
+    expect(client).toContain("usageLabel: 'Credits remaining'")
     expect(client).toContain("refresh: '刷新'")
     expect(client).toContain("learnMore: '了解企业版'")
     expect(client).toContain("learnMore: 'Learn about Enterprise'")

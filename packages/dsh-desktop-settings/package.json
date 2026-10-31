@@ -1,0 +1,11 @@
+{
+  "name": "dsh-desktop-settings",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "exports": { ".": "./index.js", "./client": "./client.js", "./package.json": "./package.json" },
+  "dsh": { "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-settings-general", "@deepseek-ai/dsh-client-ui-sidebar"] } },
+  "peerDependencies": { "@deepseek-ai/cordis": "^4.0.4", "@deepseek-ai/dsh-client-ui-primitives": "^0.2.0-rc.2", "@deepseek-ai/dsh-client-ui-settings-general": "^0.2.0-rc.2", "@deepseek-ai/dsh-client-ui-sidebar": "^0.2.0-rc.2", "react": "^18.3.1" },
+  "license": "MIT"
+}

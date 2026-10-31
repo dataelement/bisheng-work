@@ -1,5 +1,7 @@
 # Versioned Update Rollback + Prerelease Parity Implementation Plan
 
+> 历史 DSH 方案：其中的版本索引、回退和 archive backfill 不适用于当前 BISHENG。现行发布流程以[发布手册](../../release-runbook.md)为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let users install/roll back to any past production version from the update panel, and make `workflow_dispatch` prereleases byte-for-byte identical to `v*` releases (signed macOS + Windows), published to isolated locations.

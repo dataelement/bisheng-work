@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { create } from 'tar'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { mountRootInclude } from '@deepseek-ai/dsh-app-boot'
 import { Loader } from '@deepseek-ai/cordis-plugin-loader'
 import { createMarketRuntime } from '../packages/dsh-desktop-enterprise/market-runtime.js'
 import { isMarketVersionCompatible } from '../packages/dsh-desktop-enterprise/market.js'
@@ -113,6 +114,9 @@ describe('community npm packages', () => {
     const context = new Context()
     const loaderFiber = context.plugin(Loader, { baseUrl: pathToFileURL(`${root}/`).href })
     await loaderFiber
+    await writeFile(join(root, 'cordis.yml'), '[]')
+    await mountRootInclude(context, join(root, 'cordis.yml'))
+    await context.loader.await()
     let runtime: ReturnType<typeof createMarketRuntime> | undefined
     context.loader.builtins.enterpriseTest = { apply(child: Context) { runtime = createMarketRuntime(child) } }
     const ownerId = await context.loader.create({ name: 'cordis:enterpriseTest' })

@@ -75,6 +75,7 @@ function createReactStub() {
     createElement,
     useState: element,
     useEffect: () => undefined,
+    useLayoutEffect: () => undefined,
     useMemo: (factory: () => unknown) => factory(),
     useCallback: (factory: (...args: unknown[]) => unknown) => factory,
     useRef: (init: unknown) => ({ current: init }),

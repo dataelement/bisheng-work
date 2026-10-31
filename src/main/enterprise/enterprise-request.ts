@@ -144,6 +144,7 @@ export async function requestEnterpriseStream(
     })
   } catch (error) {
     if (options.signal?.aborted) throw error
+    console.warn('[enterprise] platform request failed', { path, requestId }, error)
     throw new EnterprisePlatformError('Could not reach the BiSheng platform.', {
       code: 'network_error'
     })
@@ -195,6 +196,7 @@ export async function requestEnterpriseJson(
     })
   } catch (error) {
     if (options.signal?.aborted) throw error
+    console.warn('[enterprise] platform request failed', { path, requestId }, error)
     throw new EnterprisePlatformError('Could not reach the BiSheng platform.', {
       code: 'network_error',
       uncertain: options.uncertainOnTransport === true

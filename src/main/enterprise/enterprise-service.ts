@@ -1,3 +1,8 @@
+import { createHash } from 'node:crypto'
+import { parseWorkSkillRequest, readSkillBytes } from './work-skills'
+import { parseWorkResourceRequest, readResourceJson } from './work-resources'
+import { parseWorkMcpRequest, sendWorkMcp } from './work-mcp'
+import { parseWebSession, type EnterpriseWebSession } from './web-session'
 import { parseMarketRequest } from './enterprise-market'
 import { parseEnterpriseResponsesPayload } from './enterprise-responses'
 import { discardWorkbenchArtifact, rememberWorkbenchArtifact, releaseWorkbenchArtifact as releaseRetainedWorkbenchArtifact, verifyWorkbenchArtifactResponse, WORKBENCH_ARTIFACT_LIMIT } from './workbench-artifact'
@@ -130,6 +135,7 @@ export interface EnterpriseServiceOptions {
   fetchImpl: EnterpriseFetch
   allowInsecureLoopback: boolean
   note?: (entry: EnterpriseServiceNote) => void
+  onStateChange?: (state: EnterprisePublicState) => void
   now?: () => number
   startCallback?: typeof startLoginCallbackServer
 }
@@ -166,12 +172,14 @@ export class EnterpriseService {
   private errorCode: string | undefined
   private requestId: string | undefined
   private pendingLogin: PendingLogin | undefined
+  private modelsRefresh: { epoch: number; promise: Promise<void> } | undefined
   private modelsTimer: NodeJS.Timeout | undefined
   private loginExpiryTimer: NodeJS.Timeout | undefined
   private modelsAttempt = 0
   private lastPublicSignature = ''
   private chatInFlight = 0
   private readonly chatControllers = new Set<AbortController>()
+  private readonly authenticatedControllers = new Set<AbortController>()
   private allowPrivateHttpForSession = false
   private readonly authTransport = new EnterpriseAuthTransport()
   private readonly authVersionPrefix = randomUUID()
@@ -195,7 +203,7 @@ export class EnterpriseService {
   }
 
   snapshot(): EnterprisePublicState {
-    const connected = this.phase === 'connected' || this.phase === 'degraded' || this.phase === 'refreshing'
+    const connected = Boolean(this.session?.access_token) && (this.phase === 'connected' || this.phase === 'degraded' || this.phase === 'refreshing')
     return {
       connected,
       ...(connected && this.auditFields.length ? { audit_context: { fields: [...this.auditFields] } } : {}),
@@ -300,6 +308,10 @@ export class EnterpriseService {
       const contract = await loadEnterpriseContract()
       await this.cancelPendingLogin()
       this.epoch += 1
+      for (const controller of this.chatControllers) controller.abort(enterpriseSessionChangedAbortReason())
+      this.chatControllers.clear()
+      for (const controller of this.authenticatedControllers) controller.abort(enterpriseSessionChangedAbortReason())
+      this.authenticatedControllers.clear()
       const loginEpoch = this.epoch
       this.pauseSessionForRelogin()
       const config = contract.parseConfig((await requestEnterpriseJson(
@@ -402,6 +414,26 @@ export class EnterpriseService {
     return this.refreshInFlight
   }
 
+  /** Synchronize catalog metadata using the current account's host-held credentials. */
+  async refreshModels(includeUsage = false): Promise<EnterprisePublicState> {
+    const epoch = this.epoch
+    let refresh = this.modelsRefresh
+    if (refresh?.epoch !== epoch) {
+      refresh = { epoch, promise: this.tickModels() }
+      this.modelsRefresh = refresh
+    }
+    try {
+      await refresh.promise
+    } finally {
+      if (this.modelsRefresh === refresh) this.modelsRefresh = undefined
+    }
+    if (includeUsage && this.epoch === epoch && this.phase === 'connected') {
+      await this.refreshUsageCatalog(epoch)
+      if (this.epoch === epoch) this.scheduleModels(this.modelsDelay())
+    }
+    return this.snapshot()
+  }
+
   async logout(): Promise<EnterprisePublicState> {
     this.invalidateAuthSession()
     return this.enqueueMutation(async () => {
@@ -474,6 +506,8 @@ export class EnterpriseService {
     this.epoch += 1
     for (const controller of this.chatControllers) controller.abort(enterpriseSessionChangedAbortReason())
     this.chatControllers.clear()
+    for (const controller of this.authenticatedControllers) controller.abort(enterpriseSessionChangedAbortReason())
+    this.authenticatedControllers.clear()
   }
 
   private async completeLogin(expectedEpoch: number, result: LoginCallbackAccepted): Promise<void> {
@@ -716,10 +750,7 @@ export class EnterpriseService {
       if (this.phase === 'degraded') this.phase = 'connected'
       this.modelsAttempt = 0
       this.clearError()
-      await this.refreshUsageCatalog(epoch)
-      if (this.epoch !== epoch) return
       this.publish()
-      this.scheduleModels(this.modelsDelay())
     } catch (error) {
       if (this.epoch !== epoch) return
       if (!accessRetried && error instanceof EnterprisePlatformError && error.code === 'invalid_access_token') {
@@ -954,6 +985,146 @@ export class EnterpriseService {
       return { bytes: Buffer.concat(chunks), binary: request.binary }
     }
     throw Object.assign(new Error('Enterprise login required.'), { status: 401 })
+  }
+
+  async workSkills(input: unknown, signal?: AbortSignal): Promise<{ bytes: Buffer; binary: boolean }> {
+    const request = parseWorkSkillRequest(input)
+    const epoch = this.epoch
+    const assertCurrent = () => {
+      signal?.throwIfAborted()
+      if (!this.snapshot().connected || this.connectionKey() !== request.connectionKey || this.epoch !== epoch) {
+        throw Object.assign(new Error('Enterprise account changed. Select skills again.'), { status: 409 })
+      }
+    }
+    assertCurrent()
+    const credential = await this.webSession(request.connectionKey)
+    assertCurrent()
+    const binary = request.operation === 'bundle'
+    const path = binary ? `/api/v1/linsight/skill/runtime/${request.id}/bundle?version=${request.version}`
+      : request.operation === 'dependencies' ? `/api/v1/dsh/work/skills/${request.id}/dependencies?version=${request.version}`
+      : '/api/v1/linsight/skill/runtime/catalog'
+    const { endpoint } = await resolveEnterpriseEndpoint(credential.base, path,
+      this.options.allowInsecureLoopback, this.platformRequestOptions().allowInsecurePrivateHttp)
+    assertCurrent()
+    const timeout = AbortSignal.timeout(120_000)
+    const response = await createEnterpriseFetch(this.options.fetchImpl)(endpoint.toString(), {
+      method: 'GET', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      headers: { cookie: `${credential.cookieName}=${credential.cookie}` }
+    })
+    const bytes = await readSkillBytes(response, binary ? 256 * 1024 * 1024 : 4 * 1024 * 1024)
+    assertCurrent()
+    if (binary) {
+      if (!response.headers.get('content-type')?.includes('application/zip') ||
+          createHash('sha256').update(bytes).digest('hex') !== response.headers.get('x-skill-archive-sha256')) throw new Error('Skill bundle verification failed.')
+    } else {
+      const result = JSON.parse(bytes.toString('utf8'))
+      if (result?.status_code !== 200 || !Array.isArray(result.data)) throw new Error('Skill catalog unavailable.')
+      return { bytes: Buffer.from(JSON.stringify(result.data)), binary }
+    }
+    this.options.note?.({ event: 'work_skill_bundle_read', status: 200 })
+    return { bytes, binary }
+  }
+
+  async workMcp(input: unknown, signal?: AbortSignal): Promise<unknown> {
+    const request = parseWorkMcpRequest(input)
+    const epoch = this.epoch
+    const controller = new AbortController()
+    const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
+    const assertCurrent = () => {
+      combined.throwIfAborted()
+      if (!this.snapshot().connected || this.connectionKey() !== request.connectionKey || this.epoch !== epoch) {
+        throw Object.assign(new Error('Enterprise account changed. Refresh Work capabilities.'), { status: 409 })
+      }
+    }
+    assertCurrent()
+    this.authenticatedControllers.add(controller)
+    try {
+      // webSession performs the verified Desktop exchange and access refresh.
+      const credential = await this.webSession(request.connectionKey)
+      assertCurrent()
+      const result = await sendWorkMcp({ request, credential, assertCurrent,
+        fetchImpl: this.options.fetchImpl, allowInsecureLoopback: this.options.allowInsecureLoopback,
+        allowInsecurePrivateHttp: this.platformRequestOptions().allowInsecurePrivateHttp, signal: combined })
+      this.options.note?.({ event: 'work_mcp_request', status: 200 })
+      return result
+    } finally { this.authenticatedControllers.delete(controller) }
+  }
+
+  async workResources(input: unknown, signal?: AbortSignal): Promise<unknown> {
+    const request = parseWorkResourceRequest(input)
+    const epoch = this.epoch
+    const assertCurrent = () => {
+      signal?.throwIfAborted()
+      if (!this.snapshot().connected || this.connectionKey() !== request.connectionKey || this.epoch !== epoch) {
+        throw Object.assign(new Error('Enterprise account changed. Select knowledge spaces again.'), { status: 409 })
+      }
+    }
+    assertCurrent()
+    const credential = await this.webSession(request.connectionKey)
+    assertCurrent()
+    const call = async (path: string, body?: unknown) => {
+      const { endpoint } = await resolveEnterpriseEndpoint(credential.base, path,
+        this.options.allowInsecureLoopback, this.platformRequestOptions().allowInsecurePrivateHttp)
+      assertCurrent()
+      const timeout = AbortSignal.timeout(60_000)
+      const response = await createEnterpriseFetch(this.options.fetchImpl)(endpoint.toString(), {
+        method: body === undefined ? 'GET' : 'POST',
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        headers: { cookie: `${credential.cookieName}=${credential.cookie}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) })
+      })
+      const data = await readResourceJson(response)
+      assertCurrent()
+      return data
+    }
+    if (request.operation === 'retrieve') {
+      const data = await call('/api/v1/knowledge/space/retrieve', { query: request.query, space_ids: request.spaceIds })
+      this.options.note?.({ event: 'work_knowledge_retrieved', status: 200 })
+      return data
+    }
+    const spaces: { id: number, name: string, description: string, group: string, updatedAt: string }[] = []
+    const seen = new Set<number>()
+    for (const group of ['department', 'mine', 'joined']) {
+      const data = await call(`/api/v1/knowledge/space/${group}`)
+      if (!Array.isArray(data)) throw new Error('Knowledge space list is invalid.')
+      for (const row of data) {
+        if (!Number.isSafeInteger(row.id) || row.id <= 0 || typeof row.name !== 'string') continue
+        if (seen.has(row.id)) continue
+        seen.add(row.id)
+        spaces.push({ id: row.id, name: row.name, description: typeof row.description === 'string' ? row.description : '', group, updatedAt: typeof row.update_time === 'string' ? row.update_time : '' })
+      }
+    }
+    return { spaces }
+  }
+
+  /** Host-only exchange. Credentials never cross the renderer or Harness Broker. */
+  async webSession(connectionKey: string): Promise<EnterpriseWebSession> {
+    const epoch = this.epoch
+    const assertCurrent = () => {
+      if (!this.snapshot().connected || this.connectionKey() !== connectionKey || this.epoch !== epoch) {
+        throw new Error('Enterprise account changed.')
+      }
+    }
+    assertCurrent()
+    let accessToken = await this.ensureAccess(epoch)
+    assertCurrent()
+    const base = this.session?.base
+    if (!base) throw new Error('Enterprise login required.')
+    const exchange = () => requestEnterpriseJson(this.options.fetchImpl, base, '/api/v1/dsh/web-session', {
+      ...this.platformRequestOptions(), method: 'POST', body: {}, accessToken
+    })
+    let result
+    try { result = await exchange() }
+    catch (error) {
+      if (!(error instanceof EnterprisePlatformError) || error.status !== 401) throw error
+      await this.refresh()
+      assertCurrent()
+      accessToken = await this.ensureAccess(epoch)
+      result = await exchange()
+    }
+    assertCurrent()
+    this.options.note?.({ event: 'web_session_created', status: result.status })
+    return parseWebSession(result.body, base, connectionKey, this.now())
   }
 
   async verifyWorkbenchArtifact(input: unknown): Promise<{ ok: boolean, stage?: string, error?: string }> {
@@ -1232,6 +1403,9 @@ export class EnterpriseService {
     this.epoch += 1
     this.clearModelsTimer()
     for (const controller of this.chatControllers) controller.abort(enterpriseSessionChangedAbortReason())
+    this.chatControllers.clear()
+    for (const controller of this.authenticatedControllers) controller.abort(enterpriseSessionChangedAbortReason())
+    this.authenticatedControllers.clear()
     await this.cancelPendingLogin()
     this.session = null
     this.allowPrivateHttpForSession = false
@@ -1334,7 +1508,7 @@ export class EnterpriseService {
     this.clearModelsTimer()
     if (!this.session?.access_token) return
     this.modelsTimer = setTimeout(() => {
-      void this.tickModels()
+      void this.refreshModels(true)
     }, delayMs)
     this.modelsTimer.unref?.()
   }
@@ -1364,6 +1538,7 @@ export class EnterpriseService {
     if (signature === this.lastPublicSignature) return
     this.revision += 1
     this.lastPublicSignature = publicStateSignature({ ...snapshot, revision: this.revision })
+    this.options.onStateChange?.(this.snapshot())
   }
 
   private clearError(): void {

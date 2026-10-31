@@ -77,6 +77,64 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<voi
 }
 
 describe('enterprise service login loop', () => {
+  it('publishes a new catalog revision when only an administrator display name changes', async () => {
+    const platform = createMockEnterpriseServer({ port: 0 })
+    const origin = await platform.listen()
+    cleanups.push(async () => platform.close())
+    let label = 'Provider A / Original label'
+    const requests: string[] = []
+    const fetchImpl: EnterpriseFetch = async (input, init) => {
+      requests.push(String(input))
+      const response = await globalThis.fetch(input, init)
+      if (String(input).includes('/api/v1/dsh/models') && response.ok) {
+        const body = await response.json() as { data: Array<{ display_name: string }> }
+        body.data.forEach(model => { model.display_name = label })
+        return Response.json(body)
+      }
+      return response
+    }
+    const { service } = await createService(createEnterpriseFetch(fetchImpl))
+    const started = await service.startLogin(origin)
+    await completeBrowserLogin(origin, started.authorizationUrl)
+    await waitFor(() => service.snapshot().phase === 'connected' && service.snapshot().modelsAvailable)
+    const before = service.snapshot()
+    label = 'Provider A / Renamed label'
+    requests.length = 0
+    await Promise.all([service.refreshModels(), service.refreshModels(), service.refreshModels()])
+    expect(requests.filter(url => url.includes('/api/v1/dsh/models'))).toHaveLength(1)
+    expect(requests.filter(url => url.includes('/token') || url.includes('/usage'))).toHaveLength(0)
+    const after = service.snapshot()
+    expect(after.models.map(model => model.id)).toEqual(before.models.map(model => model.id))
+    expect(after.models[0]?.display_name).toBe(label)
+    expect(after.revision).toBeGreaterThan(before.revision)
+  })
+
+  it('keeps the signed-out catalog empty when an earlier metadata refresh finishes', async () => {
+    const platform = createMockEnterpriseServer({ port: 0 })
+    const origin = await platform.listen()
+    cleanups.push(async () => platform.close())
+    let hold = false
+    let release: (() => void) | undefined
+    const fetchImpl: EnterpriseFetch = async (input, init) => {
+      const response = await globalThis.fetch(input, init)
+      if (hold && String(input).includes('/api/v1/dsh/models')) {
+        await new Promise<void>(resolve => { release = resolve })
+      }
+      return response
+    }
+    const { service } = await createService(createEnterpriseFetch(fetchImpl))
+    const started = await service.startLogin(origin)
+    await completeBrowserLogin(origin, started.authorizationUrl)
+    await waitFor(() => service.snapshot().phase === 'connected')
+    hold = true
+    const refreshing = service.refreshModels()
+    await waitFor(() => release !== undefined)
+    await service.logout()
+    release?.()
+    await refreshing
+    expect(service.snapshot()).toMatchObject({ connected: false, modelsAvailable: false, models: [] })
+  })
+
   it('retains reasoning metadata through login, refresh and detached public snapshots', async () => {
     const platform = createMockEnterpriseServer({ port: 0 })
     const origin = await platform.listen()
@@ -781,5 +839,78 @@ describe('enterprise market credential boundary', () => {
     expect(restarted.phase).toBe('authorizing')
     expect(restarted.errorCode).toBeUndefined()
     expect(Date.parse(restarted.loginExpiresAt ?? '') - now).toBe(45_000)
+  })
+})
+
+describe('enterprise browser session handoff', () => {
+  it('exchanges only host credentials, refreshes rejected access once, and rejects requests after logout', async () => {
+    const platform = createMockEnterpriseServer({ port: 0 })
+    const origin = await platform.listen()
+    cleanups.push(async () => platform.close())
+    let exchanges = 0
+    const cookie = 'signed-browser-cookie-for-host-only'
+    let releaseToken!: () => void
+    const tokenGate = new Promise<void>((resolve) => { releaseToken = resolve })
+    const fetchImpl: EnterpriseFetch = async (input, init) => {
+      if (String(input).endsWith('/token') && String(init?.body).includes('identity_ticket')) await tokenGate
+      if (String(input).endsWith('/api/v1/dsh/web-session')) {
+        exchanges += 1
+        expect(new Headers(init?.headers).get('authorization')).toMatch(/^Bearer /u)
+        if (exchanges === 1) return Response.json({ error: { code: 'invalid_access_token', message: 'Expired access' } }, { status: 401 })
+        return Response.json({ cookie, expires_in: 300 })
+      }
+      return globalThis.fetch(input, init)
+    }
+    const { service } = await createService(createEnterpriseFetch(fetchImpl))
+    const login = await service.startLogin(origin)
+    await completeBrowserLogin(origin, login.authorizationUrl)
+    await waitFor(() => service.snapshot().phase === 'refreshing')
+    expect(service.snapshot().connected).toBe(false)
+    releaseToken()
+    await waitFor(() => service.snapshot().connected)
+    const key = service.snapshot().connectionKey!
+    expect(await service.webSession(key)).toMatchObject({ cookie, connectionKey: key, base: origin })
+    expect(exchanges).toBe(2)
+    expect(JSON.stringify(service.snapshot())).not.toContain(cookie)
+    await service.logout()
+    await expect(service.webSession(key)).rejects.toThrow('Enterprise account changed')
+    expect(exchanges).toBe(2)
+  })
+})
+
+
+describe('enterprise Work MCP single sign-on', () => {
+  it('uses the logged-in account, refreshes access automatically, and rejects stale identity', async () => {
+    const platform = createMockEnterpriseServer({ port: 0 })
+    const origin = await platform.listen()
+    cleanups.push(async () => platform.close())
+    let exchanges = 0, calls = 0
+    const cookie = 'work-browser-cookie-host-owned'
+    const fetchImpl: EnterpriseFetch = async (input, init) => {
+      if (input.endsWith('/api/v1/dsh/web-session')) {
+        exchanges++
+        if (exchanges === 1) return Response.json({ error: { code: 'invalid_access_token', message: 'Expired' } }, { status: 401 })
+        expect(new Headers(init?.headers).get('authorization')).toMatch(/^Bearer /u)
+        return Response.json({ cookie, expires_in: 300 })
+      }
+      if (input.endsWith('/api/v1/dsh/work/mcp')) {
+        calls++
+        expect(new Headers(init?.headers).get('cookie')).toBe(`access_token_cookie=${cookie}`)
+        expect(new Headers(init?.headers).has('authorization')).toBe(false)
+        return Response.json({ jsonrpc: '2.0', id: 1, result: { tools: [] } })
+      }
+      return globalThis.fetch(input, init)
+    }
+    const { service } = await createService(createEnterpriseFetch(fetchImpl))
+    const login = await service.startLogin(origin)
+    await completeBrowserLogin(origin, login.authorizationUrl)
+    await waitFor(() => service.snapshot().connected)
+    const request = { connectionKey: service.snapshot().connectionKey, message: { jsonrpc: '2.0', id: 1, method: 'tools/list' } }
+    expect(await service.workMcp(request)).toMatchObject({ result: { tools: [] } })
+    expect(exchanges).toBe(2)
+    expect(JSON.stringify(service.snapshot())).not.toContain(cookie)
+    await service.logout()
+    await expect(service.workMcp(request)).rejects.toThrow('account changed')
+    expect(calls).toBe(1)
   })
 })

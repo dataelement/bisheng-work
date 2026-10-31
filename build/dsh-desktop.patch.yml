@@ -12,19 +12,22 @@
 
 # Disable the stock single-slot occupant before mounting Desktop's equivalent;
 # two occupants cannot share either brand seat. The Desktop plugin preserves
-# the stock conversation mark. The phone remains in the settings row because
-# the public footer-action slot is a separate row. Window chrome geometry
-# remains a native-shell concern.
+# the stock conversation mark. The account launcher owns phone pairing in
+# normal mode; preload keeps the legacy phone entry when it is absent. Window
+# chrome geometry remains a native-shell concern.
 - id: ui-brand-official
   disabled: true
 
-# Keep the v0.9.2 settings launcher and model setup without upstream account UI.
+# Keep the settings shell and model setup; Desktop supplies its own account launcher.
 - id: ui-settings-account
   disabled: true
 
 - insert:
     - id: dsh-desktop-client-ui
       name: dsh-desktop-client-ui
+
+    - id: dsh-desktop-settings
+      name: dsh-desktop-settings
 
     - id: dsh-desktop-enterprise
       name: dsh-desktop-enterprise

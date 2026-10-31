@@ -48,7 +48,13 @@ export function applyEnterpriseAuth(ctx) {
   })
 }
 
-/** Only the trusted loader binds an actual per-instance tree context. */
+/** Attach an already prepared grant synchronously before a new fiber applies.
+ * Never attach to a reusable Loader entry or to the shared root context. */
+export function inheritEnterpriseAuth(target, source) {
+  bindings.set(target, bindingFor(source))
+}
+
+/** Only the trusted loader binds an actual per-instance context. */
 export async function bindEnterpriseAuth(ctx, transport, onRequestSettled) {
   const lifetime = new AbortController()
   const binding = { active: true, state: publicState(await transport.state(lifetime.signal)), request }

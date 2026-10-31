@@ -1,5 +1,5 @@
 diff --git a/node_modules/undici/lib/dispatcher/dispatcher1-wrapper.js b/node_modules/undici/lib/dispatcher/dispatcher1-wrapper.js
-index e206984..0351c60 100644
+index e206984..791bec4 100644
 --- a/node_modules/undici/lib/dispatcher/dispatcher1-wrapper.js
 +++ b/node_modules/undici/lib/dispatcher/dispatcher1-wrapper.js
 @@ -17,12 +17,16 @@ class LegacyHandlerWrapper {
@@ -41,15 +41,37 @@ index e206984..0351c60 100644
    }
 
    close (...args) {
-@@ -107,4 +113,37 @@ class Dispatcher1Wrapper extends Dispatcher {
+@@ -107,4 +113,72 @@ class Dispatcher1Wrapper extends Dispatcher {
    }
  }
 
 +function withRawList (controller, field, fallback) {
 +  if (controller == null || Array.isArray(controller[field])) return controller
-+  return Object.assign(Object.create(Object.getPrototypeOf(controller)), controller, {
-+    [field]: toRawHeaders(controller[field] ?? fallback ?? {})
-+  })
++  let raw = toRawHeaders(controller[field] ?? fallback ?? {})
++  // DispatchController is a view; its getters and lifecycle methods must keep
++  // the original receiver because implementations can own private fields.
++  const adapted = Object.create(controller)
++  for (const name of ['aborted', 'paused', 'reason', 'rawHeaders', 'rawTrailers']) {
++    const descriptor = {
++      enumerable: true,
++      get: () => name === field ? raw : Reflect.get(controller, name, controller)
++    }
++    if (name === 'rawHeaders' || name === 'rawTrailers') {
++      descriptor.set = value => {
++        if (!Reflect.set(controller, name, value, controller)) {
++          throw new TypeError('Cannot update read-only DispatchController headers')
++        }
++        if (name === field) raw = value
++      }
++    }
++    Object.defineProperty(adapted, name, descriptor)
++  }
++  for (const name of ['abort', 'pause', 'resume']) {
++    if (typeof controller[name] === 'function') {
++      Object.defineProperty(adapted, name, { value: controller[name].bind(controller) })
++    }
++  }
++  return adapted
 +}
 +
 +// Node's fetch handler already implements onRequestStart, so wrapHandler leaves
@@ -60,20 +82,33 @@ index e206984..0351c60 100644
 +    return handler
 +  }
 +  const adapted = Object.create(handler)
-+  if (typeof handler.onRequestUpgrade === 'function') {
-+    adapted.onRequestUpgrade = function (controller, statusCode, headers, socket) {
-+      return handler.onRequestUpgrade(withRawList(controller, 'rawHeaders', headers), statusCode, headers, socket)
++  // Forward the remaining DispatchHandler callbacks to the real instance,
++  // including LegacyHandlerWrapper's private state. Do not inherit receivers.
++  for (const name of ['onRequestStart', 'onResponseData', 'onResponseError', 'onBodySent', 'onRequestSent', 'onResponseStarted']) {
++    if (typeof handler[name] === 'function') {
++      Object.defineProperty(adapted, name, { value: handler[name].bind(handler) })
 +    }
++  }
++  if (typeof handler.onRequestUpgrade === 'function') {
++    Object.defineProperty(adapted, 'onRequestUpgrade', {
++      value (controller, statusCode, headers, socket) {
++        return handler.onRequestUpgrade(withRawList(controller, 'rawHeaders', headers), statusCode, headers, socket)
++      }
++    })
 +  }
 +  if (typeof handler.onResponseStart === 'function') {
-+    adapted.onResponseStart = function (controller, statusCode, headers, statusMessage) {
-+      return handler.onResponseStart(withRawList(controller, 'rawHeaders', headers), statusCode, headers, statusMessage)
-+    }
++    Object.defineProperty(adapted, 'onResponseStart', {
++      value (controller, statusCode, headers, statusMessage) {
++        return handler.onResponseStart(withRawList(controller, 'rawHeaders', headers), statusCode, headers, statusMessage)
++      }
++    })
 +  }
 +  if (typeof handler.onResponseEnd === 'function') {
-+    adapted.onResponseEnd = function (controller, trailers) {
-+      return handler.onResponseEnd(withRawList(controller, 'rawTrailers', trailers), trailers)
-+    }
++    Object.defineProperty(adapted, 'onResponseEnd', {
++      value (controller, trailers) {
++        return handler.onResponseEnd(withRawList(controller, 'rawTrailers', trailers), trailers)
++      }
++    })
 +  }
 +  return adapted
 +}

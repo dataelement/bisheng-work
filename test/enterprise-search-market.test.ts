@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
+import { mountRootInclude } from '@deepseek-ai/dsh-app-boot'
 import { Loader } from '@deepseek-ai/cordis-plugin-loader'
 import '@deepseek-ai/dsh-web'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -55,14 +56,15 @@ async function fixture(options: { bridge?: boolean; disabledWeb?: boolean } = {}
   cleanups.push(() => rm(home, { recursive: true, force: true }))
   const profile = join(home, 'profiles', 'web')
   await mkdir(profile, { recursive: true })
-  await writeFile(join(profile, 'cordis.yml'), '- name: @deepseek-ai/dsh-web\n  config:\n    searchProvider: previous\n')
+  await writeFile(join(profile, 'cordis.yml'), JSON.stringify([{ id: 'web', name: '@deepseek-ai/dsh-web', config: { searchProvider: 'previous', fetchProvider: 'http' } }]))
   await mkdir(join(home, 'profiles', 'node_modules'), { recursive: true })
   await symlink(await realpath('node_modules/@deepseek-ai'), join(home, 'profiles', 'node_modules', '@deepseek-ai'), process.platform === 'win32' ? 'junction' : 'dir')
   const ctx = new Context()
   await ctx.plugin(Loader, { baseUrl: pathToFileURL(profile + '/').href })
   cleanups.push(() => ctx.fiber.dispose())
-  const webId = await ctx.loader.create({ name: '@deepseek-ai/dsh-web', config: { searchProvider: 'previous', fetchProvider: 'http' } })
-  const webEntry = ctx.loader.store[webId]
+  await mountRootInclude(ctx, join(profile, 'cordis.yml'))
+  await ctx.loader.await()
+  const webEntry = [...ctx.loader.entries()].find(entry => entry.options.id === 'web')
   const webFiber = webEntry?.fiber
   if (!webEntry || !webFiber) throw new Error('Web fixture did not create a runtime')
   await webFiber.await()
@@ -142,7 +144,7 @@ describe('enterprise search market installation', () => {
 
   it('rolls back selection and installation when required host services are missing', async () => {
     const { ctx, market, webFiber } = await fixture({ bridge: false })
-    await expect(install(market)).rejects.toThrow(/dependencies or configuration/)
+    await expect(install(market)).rejects.toThrow(/enterpriseAuth|dependencies or configuration/)
     expect(market.state().installed).toEqual([])
     expect(readConfig(webFiber.config)).toMatchObject({ searchProvider: 'previous' })
     await expect(ctx.web.search({ query: 'test' })).resolves.toMatchObject({ content: 'previous result' })

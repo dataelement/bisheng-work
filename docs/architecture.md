@@ -41,8 +41,8 @@ Electron userData/
 ├── launch-root/                 Neutral Harness process working directory
 ├── harness/                     DSH_HOME
 │   ├── profiles/                Normal and Safe Mode profiles
+│   │   └── web/cordis.patch.yml  Normal Profile settings and user overrides
 │   ├── sessions/                Conversation state
-│   ├── settings.yaml            Harness-backed settings
 │   └── plugins and package data
 ├── bin/                         Cached desktop helper binaries
 └── update-skip.json             Remembered update choice, when present
@@ -52,6 +52,8 @@ Electron logs/
 ```
 
 Production and development builds use separate user-data roots. Application upgrades do not replace profile, plugin, workspace, session, or model configuration data.
+
+Harness 0.2.0-rc.2 migrates legacy `settings.yaml` sections into the active Profile's configuration. The native shell consumes the Client's resolved language through the upstream `__DSH_LOCALE__` bridge after activation; it does not treat the retired settings file as the live language source. The bridge supplies OS languages at initialization and leaves the durable preference to Harness configForms.
 
 ## Window and IPC security
 

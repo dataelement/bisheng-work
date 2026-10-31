@@ -13,7 +13,7 @@ export interface MarketController {
   state(): MarketState
   synchronize(): Promise<void>
   catalog(query?: string, page?: number): Promise<MarketState & { data: unknown[]; total: number; installReady?: boolean }>
-  act(input: { action: string; plugin_id: string; version_id?: string; config?: Record<string, unknown> }): Promise<MarketState>
+  act(input: { action: string; plugin_id: string; expectedAccountKey?: string; version_id?: string; config?: Record<string, unknown> }): Promise<MarketState>
   stop(): Promise<void>
   tick(): Promise<void>
 }

@@ -180,6 +180,18 @@ async function usageFrom(payload) {
 }
 
 describe('BiSheng OpenAI adapter', () => {
+  it('refreshes configured names and provider labels while preserving the model route', async () => {
+    let current = [{ ...model, display_name: 'Provider A / Custom label' }]
+    const adapter = new EnterpriseLlmAdapter({ providerName: () => 'Enterprise', models: () => current })
+    const before = (await adapter.listModels('bisheng-enterprise'))[0]
+    expect(before.name).toBe('Provider A / Custom label')
+    current = [{ ...model, display_name: 'Provider A / Updated label' }]
+    const after = await adapter.resolveModel('bisheng-enterprise', model.id)
+    expect(after.name).toBe('Provider A / Updated label')
+    expect(after.id).toBe(before.id)
+    expect(serializeEnterpriseRequest({ model: after.id, messages: [] }, current[0]).model).toBe(model.id)
+  })
+
   it.each([
     { text: 'result', isError: false, expected: 'result' },
     { text: 'lookup failed', isError: true, expected: 'lookup failed' },

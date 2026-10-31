@@ -1,3 +1,6 @@
+import { createAboutPresentation } from './about-presentation'
+import { renderSafeModeBannerLocale, type SafeModeBannerElements } from './safe-mode-locale'
+import type { EnterpriseChatPresentation, EnterpriseChatViewState } from '../shared/enterprise-chat-view'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { UpdateStatus } from '../shared/contracts'
 import { setupDesktopStoragePersistence } from './desktop-storage'
@@ -12,8 +15,11 @@ import { isPluginLoadError } from './plugin-error-view'
 import { mountPluginErrorToast } from './plugin-error-toast'
 import { findBootFailureText } from './boot-failure'
 import { markWindowsTitlebar, mountWindowsTitlebarLayout } from './windows-titlebar'
+import { mountMacosWindowTheme } from './macos-window-theme'
 import { mountMacosWindowChrome } from './macos-window-chrome'
 import { createHostPathsBridge, HOST_PATHS_BRIDGE } from './host-paths'
+import { createNativeLocaleBridge } from './native-locale'
+import { localeFromHtmlLang, NATIVE_LOCALE_BRIDGE, NATIVE_LOCALE_CHANGE, NATIVE_LOCALE_READ } from '../shared/native-locale'
 
 if (process.platform === 'darwin') {
   const dispose = mountMacosWindowChrome(document, listener => {
@@ -34,7 +40,12 @@ setupDesktopNotificationBridge()
 
 const MOBILE_BUTTON_ID = 'dsh-desktop-mobile-button'
 const SAFE_MODE_BANNER_ID = 'dsh-desktop-safe-mode-banner'
-const locale: UpdateLocale = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+
+function navigatorLocale(): UpdateLocale {
+  return navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+}
+
+let locale: UpdateLocale = localeFromHtmlLang(document.documentElement?.lang) ?? navigatorLocale()
 
 let host: HTMLDivElement | undefined
 let content: HTMLDivElement | undefined
@@ -53,6 +64,8 @@ interface AboutInfo {
 }
 let aboutHost: HTMLElement | null = null
 let aboutShadow: ShadowRoot | null = null
+const aboutPresentation = createAboutPresentation(document, window)
+window.addEventListener('unload', () => aboutPresentation.dispose(), { once: true })
 let aboutOpen = false
 let aboutInfo: AboutInfo | null = null
 let receivedStatusEvent = false
@@ -61,6 +74,7 @@ let sidebarSettingsArea: HTMLElement | undefined
 let sidebarRoot: HTMLElement | undefined
 /** The Safe Mode card; it lives in the sidebar just above the settings row. */
 let safeModeBannerHost: HTMLElement | undefined
+let safeModeBannerElements: SafeModeBannerElements | undefined
 let mobileButton: HTMLButtonElement | undefined
 let domSyncScheduled = false
 let bootScanSettled = false
@@ -180,6 +194,40 @@ contextBridge.exposeInMainWorld(
   createHostPathsBridge(file => webUtils.getPathForFile(file))
 )
 
+function publishLocale(next: UpdateLocale): void {
+  void ipcRenderer.invoke(NATIVE_LOCALE_CHANGE, next).catch((error: unknown) => {
+    console.error('[desktop-locale] unable to synchronize language', error)
+  })
+}
+
+/** Refresh chrome that follows the in-app language. Publishing is for the document language, which the bridge reports on its own. */
+function applyLiveLocale(next: UpdateLocale, publish: boolean): void {
+  if (next === locale) return
+  locale = next
+  if (safeModeBannerElements) renderSafeModeBannerLocale(safeModeBannerElements, locale)
+  const frame = safeModeFrameHost?.querySelector('iframe')
+  if (frame) frame.title = locale === 'zh' ? '安全模式' : 'Safe Mode'
+  renderMobileButton()
+  render()
+  renderAbout()
+  if (publish) publishLocale(next)
+}
+
+function syncLocaleFromDocument(): void {
+  const next = localeFromHtmlLang(document.documentElement?.lang)
+  if (!next) return
+  applyLiveLocale(next, true)
+}
+
+contextBridge.exposeInMainWorld(NATIVE_LOCALE_BRIDGE, createNativeLocaleBridge({
+  read: () => ipcRenderer.invoke(NATIVE_LOCALE_READ),
+  publish: active => ipcRenderer.invoke(NATIVE_LOCALE_CHANGE, active),
+  changed: active => {
+    applyLiveLocale(active, false)
+  },
+  failed: error => console.error('[desktop-locale] unable to synchronize language', error)
+}))
+
 /**
  * `[data-dsh-*]` lookups are attribute selectors with no index behind them, so
  * a miss costs a full tree walk. Caching the nodes turns the steady state into
@@ -191,15 +239,22 @@ function liveElement<T extends Element>(cached: T | undefined, selector: string)
 }
 
 function mountMobileButton(): void {
+  sidebarSettingsArea = liveElement(sidebarSettingsArea, '[data-dsh-sidebar-settings]')
+  const settingsArea = sidebarSettingsArea
+  if (!settingsArea) return
+  // The optional account launcher owns this action in normal mode. Keep the
+  // legacy button only for Safe Mode or compositions without that launcher.
+  if (settingsArea.querySelector('[data-dsh-account-launcher]')) {
+    mobileButton?.remove()
+    document.getElementById(`${MOBILE_BUTTON_ID}-style`)?.remove()
+    return
+  }
   if (!document.getElementById(`${MOBILE_BUTTON_ID}-style`)) {
     const style = document.createElement('style')
     style.id = `${MOBILE_BUTTON_ID}-style`
     style.textContent = mobileButtonStyles
     document.head.appendChild(style)
   }
-  sidebarSettingsArea = liveElement(sidebarSettingsArea, '[data-dsh-sidebar-settings]')
-  const settingsArea = sidebarSettingsArea
-  if (!settingsArea) return
   if (!mobileButton?.isConnected) {
     mobileButton =
       (document.getElementById(MOBILE_BUTTON_ID) as HTMLButtonElement | null) ?? undefined
@@ -275,10 +330,8 @@ async function mountSafeModeBanner(): Promise<void> {
   try {
     const status = (await ipcRenderer.invoke('safe-mode:status')) as {
       active?: boolean
-      locale?: 'en' | 'zh'
     }
     if (status.active !== true) return
-    const safeModeLocale = status.locale === 'zh' ? 'zh' : 'en'
 
     const host = document.createElement('div')
     host.id = SAFE_MODE_BANNER_ID
@@ -316,25 +369,17 @@ async function mountSafeModeBanner(): Promise<void> {
     dot.className = 'dot'
     const label = document.createElement('span')
     label.className = 'title'
-    label.textContent = safeModeLocale === 'zh' ? '安全模式' : 'Safe Mode'
     const description = document.createElement('span')
     description.className = 'description'
-    description.textContent = safeModeLocale === 'zh'
-      ? '已暂时停用所有第三方插件，可停用有问题的插件后重启。'
-      : 'All third-party plugins are temporarily disabled. Disable a problematic plugin, then restart.'
     const actions = document.createElement('span')
     actions.className = 'actions'
     const manage = document.createElement('button')
     manage.type = 'button'
-    manage.textContent = safeModeLocale === 'zh' ? '管理插件' : 'Manage plugins'
-    manage.setAttribute('aria-label', safeModeLocale === 'zh' ? '停用或启用第三方插件' : 'Disable or re-enable third-party plugins')
     manage.addEventListener('click', () => {
       void ipcRenderer.invoke('safe-mode:manage')
     })
     const exit = document.createElement('button')
     exit.type = 'button'
-    exit.textContent = safeModeLocale === 'zh' ? '退出安全模式' : 'Exit Safe Mode'
-    exit.setAttribute('aria-label', safeModeLocale === 'zh' ? '退出安全模式并重启' : 'Exit Safe Mode and restart')
     exit.addEventListener('click', () => {
       manage.disabled = true
       exit.disabled = true
@@ -354,13 +399,13 @@ async function mountSafeModeBanner(): Promise<void> {
     const compact = document.createElement('button')
     compact.type = 'button'
     compact.className = 'compact'
-    compact.title = safeModeLocale === 'zh' ? '安全模式：管理插件' : 'Safe Mode: manage plugins'
-    compact.setAttribute('aria-label', compact.title)
     compact.appendChild(dot.cloneNode(true))
     compact.addEventListener('click', () => {
       void ipcRenderer.invoke('safe-mode:manage')
     })
     shadow.append(style, bar, compact)
+    safeModeBannerElements = { label, description, manage, exit, compact }
+    renderSafeModeBannerLocale(safeModeBannerElements, locale)
     safeModeBannerHost = host
     placeSafeModeBanner()
   } catch (error) {
@@ -388,6 +433,10 @@ ipcRenderer.on('mobile:status-changed', (_event, status: { connected?: boolean }
 })
 
 function initializeUi(): void {
+  if (process.platform === 'darwin') {
+    const dispose = mountMacosWindowTheme(document, ipcRenderer)
+    window.addEventListener('unload', dispose, { once: true })
+  }
   if (process.platform === 'win32') {
     mountWindowsTitlebarLayout({ document, ipcRenderer })
   }
@@ -399,6 +448,13 @@ function initializeUi(): void {
     childList: true,
     subtree: true
   })
+  const localeObserver = new MutationObserver(() => syncLocaleFromDocument())
+  localeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['lang']
+  })
+  window.addEventListener('unload', () => localeObserver.disconnect(), { once: true })
+  syncLocaleFromDocument()
   void refreshMobileStatus()
   void mountSafeModeBanner()
   positionSafeModeFrame()
@@ -574,6 +630,35 @@ window.addEventListener('pagehide', () => {
   pluginErrorToast.dispose()
 })
 
+ipcRenderer.on('enterprise-chat:close-settings', () => {
+  window.dispatchEvent(new CustomEvent('dsh-desktop:close-settings'))
+})
+ipcRenderer.on('enterprise-chat:settings-focus', (_event, detail) => {
+  window.dispatchEvent(new CustomEvent('dsh-desktop:settings-focus', { detail }))
+})
+
+contextBridge.exposeInMainWorld('dshEnterpriseChat', Object.freeze({
+  onToolsChanged: (listener: () => void): (() => void) => {
+    if (typeof listener !== 'function') throw new TypeError('Tool change listener must be a function.')
+    const receive = (): void => listener()
+    ipcRenderer.on('enterprise-chat:tools-changed', receive)
+    return () => ipcRenderer.removeListener('enterprise-chat:tools-changed', receive)
+  },
+  focusSettings: (): Promise<void> => ipcRenderer.invoke('enterprise-chat:focus-settings'),
+  present: (value: EnterpriseChatPresentation): Promise<EnterpriseChatViewState> => ipcRenderer.invoke('enterprise-chat:present', value),
+  state: (): Promise<EnterpriseChatViewState> => ipcRenderer.invoke('enterprise-chat:state'),
+  retry: (): Promise<void> => ipcRenderer.invoke('enterprise-chat:retry'),
+  usage: (): Promise<import('../shared/enterprise-usage').EnterpriseUsage> => ipcRenderer.invoke('enterprise-chat:usage'),
+  history: (page: number) => ipcRenderer.invoke('enterprise-chat:history', page),
+  openPage: (id: string): Promise<void> => ipcRenderer.invoke('enterprise-chat:open-page', id),
+  open: (id: string): Promise<void> => ipcRenderer.invoke('enterprise-chat:open', id),
+  subscribe: (listener: (state: EnterpriseChatViewState) => void): (() => void) => {
+    const receive = (_event: Electron.IpcRendererEvent, state: EnterpriseChatViewState): void => listener(state)
+    ipcRenderer.on('enterprise-chat:changed', receive)
+    return () => ipcRenderer.removeListener('enterprise-chat:changed', receive)
+  }
+}))
+
 contextBridge.exposeInMainWorld(
   'dshDesktopEnterprise',
   Object.freeze({
@@ -599,6 +684,9 @@ contextBridge.exposeInMainWorld(
   'dshDesktop',
   Object.freeze({
     restartHarness: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('harness:restart'),
+    openPhonePairing: (): Promise<void> => ipcRenderer.invoke('mobile:open-pairing'),
+    settingsInfo: (): Promise<AboutInfo> => ipcRenderer.invoke('desktop:about-info'),
+    settingsAction: (action: 'check-for-updates' | 'show-harness-log' | 'safe-mode'): Promise<void> => ipcRenderer.invoke('desktop:settings-action', action),
     getBuiltInImageGenerationStatus: (): Promise<{ enabled: boolean; marketActive: boolean }> =>
       ipcRenderer.invoke('desktop-host-plugin:status'),
     setBuiltInImageGenerationEnabled: (enabled: boolean): Promise<{ ok: boolean; enabled?: boolean; restartRequired?: boolean; reason?: string }> =>
@@ -814,6 +902,7 @@ function renderAbout(): void {
   if (!aboutHost || !aboutShadow) return
   if (!aboutOpen || !aboutInfo) {
     aboutHost.style.display = 'none'
+    aboutPresentation.close()
     const existing = aboutShadow.querySelector('.about-overlay')
     if (existing) existing.remove()
     return
@@ -821,7 +910,7 @@ function renderAbout(): void {
 
   aboutHost.style.display = 'flex'
   const info = aboutInfo
-  const zh = info.locale === 'zh'
+  const zh = locale === 'zh'
 
   let overlay = aboutShadow.querySelector('.about-overlay') as HTMLElement | null
   if (!overlay) {
@@ -871,6 +960,7 @@ function renderAbout(): void {
   card.appendChild(body)
 
   overlay.replaceChildren(card)
+  aboutPresentation.show(closeBtn)
 }
 function dismissCurrent(): void {
   if (!currentStatus) return
@@ -1182,6 +1272,9 @@ ipcRenderer.on('updates:status-changed', (_event, status: UpdateStatus) => {
 ipcRenderer.on('desktop:show-about', (_event, info: AboutInfo) => {
   aboutInfo = info
   aboutOpen = true
+  const live = localeFromHtmlLang(document.documentElement?.lang)
+  if (live) applyLiveLocale(live, true)
+  else if (info.locale === 'en' || info.locale === 'zh') applyLiveLocale(info.locale, false)
   renderAbout()
 })
 

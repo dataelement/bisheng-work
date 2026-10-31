@@ -163,6 +163,20 @@ describe('restricted enterprise credential broker', () => {
     expect(state.headers.get('access-control-allow-origin')).toBeNull()
   })
 
+  it('authorizes metadata refresh through the narrow broker route', async () => {
+    const { broker, service } = await createRuntime()
+    const refresh = vi.spyOn(service, 'refreshModels')
+    const path = '/v1/models/refresh'
+    expect((await fetch(new URL(path, broker.url), { method: 'POST', body: '{}' })).status).toBe(401)
+    expect((await brokerFetch(broker, path, { method: 'POST', body: '{}', headers: { origin: 'https://example.com' } })).status).toBe(403)
+    expect((await brokerFetch(broker, path, { method: 'POST', body: JSON.stringify({ base: 'https://example.com' }) })).status).toBe(400)
+    expect(refresh).toHaveBeenCalledTimes(0)
+    const response = await brokerFetch(broker, path, { method: 'POST', body: '{}' })
+    expect(response.status).toBe(200)
+    assertPublicBrokerPayload(await response.json())
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
   it('logs in through the fixed routes without exporting credentials', async () => {
     const platform = createMockEnterpriseServer({ port: 0 })
     const origin = await platform.listen()

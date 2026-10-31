@@ -20,8 +20,12 @@ const UiWorkspaceService = vm.runInNewContext(`(() => {
 let apply, Workbenches
 // Workbench routing only runs once the user has switched the feature on.
 const enabledStorage = { getItem: key => key === 'dsh-workbench-enabled' ? 'true' : null, setItem: () => {}, removeItem: () => {} }
+const windowEvents = new EventTarget()
 vm.runInNewContext(workbenchSource, {
-  window: { localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
+  window: {
+    addEventListener: windowEvents.addEventListener.bind(windowEvents),
+    removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
+    localStorage: enabledStorage, __ModuleLoader__: { load({ factory }) {
     const client = factory((name) => {
       if (name === 'react') return { createElement() {}, Component: class {} }
       if (name === '@deepseek-ai/cordis') return { Service }
@@ -45,6 +49,7 @@ function fixture() {
   const workspaceState = { phase: 'ready', items: [{ workspaceId: 'project', path: '/project', createdAt: '2026-01-01T00:00:00Z', sessionIds: [] }], archivedSessionIds: [] }
   const listeners = new Set()
   const subscribe = listener => { listeners.add(listener); return () => listeners.delete(listener) }
+  service.navigationHandlers = new Set()
   service.sessionStarter = null
   service.sessionOpener = null
   service.sessionReuseFilter = null
@@ -612,4 +617,15 @@ describe('native Workspace navigation with workbench routing', () => {
     expect(uiWorkspace.selection.getSnapshot()).toEqual({})
     expect(uiWorkspace.ctx.layout.selectPanel).toHaveBeenLastCalledWith('desktop-workbenches')
   })
+})
+
+it('lets the shared shell handle New Chat while preserving the workbench starter and local record opening', () => {
+  const { service: uiWorkspace } = fixture()
+  const cloud = vi.fn((intent, workspaceId) => intent === 'new' && workspaceId === undefined)
+  const stop = uiWorkspace.registerNavigationHandler(cloud)
+  uiWorkspace.startSession()
+  expect(cloud).toHaveBeenCalledWith('new', undefined)
+  expect(uiWorkspace.sessions.create).not.toHaveBeenCalled()
+  stop()
+  expect(uiWorkspace.navigationHandlers.size).toBe(0)
 })

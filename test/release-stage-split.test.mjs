@@ -23,16 +23,56 @@ it('gates Windows builds on shared checks while retaining native coverage', asyn
     expect(checks).toContain(`test/${name}`)
     expect(config).not.toContain(`'test/${name}'`)
   }
-  expect(step('windows-x64', 'Run focused Windows regressions').run).toBe('npm run test:windows')
-  expect(step('windows-x64', 'Run complete Windows test suite').run).toBe('npm test')
+  expect(step('windows-x64', 'Run focused Windows regressions').run).toBe('npx --no-install vitest run --config vitest.windows.config.ts')
+  expect(step('windows-x64', 'Run complete Windows test suite').run).toBe('npx --no-install vitest run')
   expect(step('windows-x64', 'Smoke test packaged Windows Harness').run).toContain('GetCurrentProcessId')
+})
+
+it('prepares application inputs once before CI tests and reuses the build for packaging', () => {
+  for (const job of ['macos', 'windows-x64']) {
+    const steps = jobs[job].steps
+    const builds = steps.filter(item => item.run?.includes('npm run build'))
+    expect(builds).toHaveLength(1)
+    const buildIndex = steps.indexOf(builds[0])
+    const tests = steps.filter(item => item.run?.startsWith('npx --no-install vitest run'))
+    expect(tests.length).toBeGreaterThan(0)
+    for (const test of tests) expect(steps.indexOf(test)).toBeGreaterThan(buildIndex)
+    const packages = steps.filter(item => item.run?.includes('--publish never'))
+    expect(packages.length).toBeGreaterThan(0)
+    for (const pack of packages) {
+      expect(steps.indexOf(pack)).toBeGreaterThan(buildIndex)
+      for (const test of tests) expect(steps.indexOf(pack)).toBeGreaterThan(steps.indexOf(test))
+      expect(pack.run).not.toContain('npm run build')
+    }
+    // These commands would trigger npm pretest hooks and prepare Office again.
+    expect(steps.some(item => /^npm (test|run test:windows)$/.test(item.run ?? ''))).toBe(false)
+  }
+})
+
+it('reuses checkout history and installs formal release note tooling once', () => {
+  const steps = jobs.publish.steps
+  expect(steps.find(item => item.uses === 'actions/checkout@v4').with['fetch-depth']).toBe(0)
+  const installs = steps.filter(item => item.run?.includes('npm install -g @github/copilot'))
+  expect(installs).toHaveLength(1)
+  const notes = steps.filter(item => item.name?.startsWith('Generate '))
+  expect(notes).toHaveLength(2)
+  for (const note of notes) {
+    expect(steps.indexOf(note)).toBeGreaterThanOrEqual(steps.indexOf(installs[0]))
+    expect(note.run).toContain('validate --tag')
+    expect(note.run).toContain('generate-fallback')
+  }
+  expect(steps.some(item => item.run?.includes('git fetch --force --tags'))).toBe(false)
 })
 
 it('builds signed installers once on the signer and preserves development installers', async () => {
   const { scripts } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
   expect(scripts['package:win:unpacked']).toBe('node scripts/verify-target.mjs win32 x64 && npm run build && node scripts/electron-builder-windows.mjs --win --x64 --dir --publish never')
-  expect(step('windows-x64', 'Build Windows release package').run).toBe('npm run package:win:unpacked')
-  expect(step('windows-x64', 'Build isolated Windows development package').run).toBe('npm run package:dev:win')
+  const build = step('windows-x64', 'Build Windows application once').run
+  expect(build).toBe('node scripts/verify-target.mjs win32 x64 && npm run build')
+  expect(step('windows-x64', 'Build Windows release package').run).toBe('node scripts/electron-builder-windows.mjs --win --x64 --dir --publish never')
+  expect(step('windows-x64', 'Build isolated Windows development package').run).toBe('node scripts/electron-builder-windows.mjs --win --x64 --publish never --config electron-builder.dev.cjs')
+  expect(step('windows-x64', 'Archive unpacked Windows release for inner binary signing').run)
+    .toBe('node scripts/archive-windows-unpacked.mjs')
   const upload = step('windows-x64', 'Stage unsigned Windows assets in draft release').run
   expect(upload).toContain('dist/win-unpacked.tar.gz')
   expect(upload).not.toContain('setup.exe')

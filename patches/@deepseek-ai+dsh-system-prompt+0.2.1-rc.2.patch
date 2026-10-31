@@ -1,0 +1,30 @@
+diff --git a/node_modules/@deepseek-ai/dsh-system-prompt/lib/index.js b/node_modules/@deepseek-ai/dsh-system-prompt/lib/index.js
+index bb0cee5..deef28e 100644
+--- a/node_modules/@deepseek-ai/dsh-system-prompt/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-system-prompt/lib/index.js
+@@ -355,6 +355,9 @@ var SystemPrompt = class extends Service {
+ 	*/
+ 	async assemble(context = {}) {
+ 		const scope = context.scope;
++		context.signal?.throwIfAborted();
++		await this.ctx.serial(scopeTarget(this, scope), "system-prompt/prepare", context);
++		context.signal?.throwIfAborted();
+ 		const scopeLayers = this.layers.chainLayers(scope);
+ 		const runtimeContextSuppressed = !this.layers.global.runtimeContextSuppressors.isEmpty() || scopeLayers.some((layer) => !layer.runtimeContextSuppressors.isEmpty());
+ 		const variables = {};
+diff --git a/node_modules/@deepseek-ai/dsh-system-prompt/lib/types/index.d.ts b/node_modules/@deepseek-ai/dsh-system-prompt/lib/types/index.d.ts
+index bc0d073..8186a36 100644
+--- a/node_modules/@deepseek-ai/dsh-system-prompt/lib/types/index.d.ts
++++ b/node_modules/@deepseek-ai/dsh-system-prompt/lib/types/index.d.ts
+@@ -12,6 +12,11 @@ declare module '@deepseek-ai/cordis' {
+         systemPrompt: SystemPrompt;
+     }
+     interface Events {
++        /** Refresh mutable providers before collecting sections and tool schemas.
++         * Scope-filtered, awaited preparation; rejection prevents assembly.
++         * @mode serial
++         */
++        'system-prompt/prepare'(this: Scoped<SystemPrompt>, context: AssembleContext): Promise<void>;
+         /**
+          * Expert waterfall over the assembled sections, contexts, tools, and variables.
+          * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): scoped listeners

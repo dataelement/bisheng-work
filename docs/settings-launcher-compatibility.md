@@ -1,9 +1,9 @@
-# v0.9.2 设置入口兼容
+# 设置入口与账号兼容
 
-Desktop 暂不使用 Harness 0.1.7-rc.1 的 `@deepseek-ai/dsh-client-ui-settings-account` 插件。普通模式和 Safe Mode 的宿主组合层均设置 `ui-settings-account` 为 disabled。
+Desktop 当前基于 Harness `0.2.0-rc.2`，普通模式和 Safe Mode 均禁用上游 `@deepseek-ai/dsh-client-ui-settings-account`（`ui-settings-account`）。这同时停用该插件的侧栏账号菜单、模型 onboarding 登录入口及账号设置页；不删除账号凭据或用户 Profile。
 
-这会同时停用该插件的侧栏账号菜单、模型 onboarding 登录入口及账号设置页。左下角使用 `settings-general` 自带的设置按钮，模型提供方和 API 配置仍由模型设置插件承载。配置不删除账号凭据或修改用户 Profile。
+设置按钮、快捷键和外框继续由 `settings-general` 提供。普通模式沿用 DSH 默认的平级导航、通用设置行、标题区操作和插件标签页，不再覆盖四个布局 slot 或添加高级折叠层。`dsh-desktop-settings` 和 `dsh-desktop-enterprise` 通过既有 section / tab / account 扩展点补入 Bisheng 内容。企业认证继续由主进程维护；网页账号资料、用量及审批只以内容模式嵌入。Safe Mode 保留原有核心设置，不加载这项可选整合。
 
-`settings.launcher` 的声明、出口和其他插件贡献保持原样。无需第三方 JS 补丁；上一轮仅移除 AccountMenu 注册的临时补丁已删除。将来启用账号功能时可以撤销这两个组合层覆盖。
+`settings.launcher` 的声明、出口和其他插件贡献保持原样。普通模式由 `dsh-desktop-settings` 提供企业账号入口，展示账号名称与头像缩写，菜单依次为设置、消息、连接手机、退出登录。它消费现有主进程企业服务的状态与退出端点，不恢复上游账号服务。消息打开独立 Modal，不再注册为 settings.section；连接手机复用受信任主窗口限定的原生配对入口。未登录时仍可进入本机设置和手机配对；企业操作禁用。Safe Mode 或卸载该可选插件时，原设置按钮及旧手机按钮继续可用。将来恢复上游账号功能时，需先解决单一账号入口与企业身份归属，再撤销组合层覆盖，避免同时出现两套账号设置。
 
-`test/settings-account-launcher.test.js` 使用实际上游组合层与两个 Desktop 组合层验证禁用结果，以及普通设置和模型设置保持启用。实际应用的展开/折叠侧栏、模型设置及深浅主题仍需 UI 验收。
+整合边界及验收范围见 [统一设置](settings-integration.zh.md)。`test/settings-account-launcher.test.js` 验证两套组合层的禁用结果；`test/desktop-settings-view.test.mjs` 和 `test/desktop-settings-runtime.test.ts` 覆盖 DSH 默认布局与 Bisheng 贡献的组合及真实 Harness 脚本发现。上述测试不能替代已安装客户端、企业认证后的原生网页视图和 Windows 验收。

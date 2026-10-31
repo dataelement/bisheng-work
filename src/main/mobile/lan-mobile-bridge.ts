@@ -756,7 +756,7 @@ export class LanMobileBridge {
 
     if (request.method === 'GET' && url.pathname === '/desktop/status') {
       if (this.rejectUnlessDesktop(request, transportAddress, response)) return
-      return this.json(response, 200, { connected: this.sessions.size > 0 })
+      return this.json(response, 200, { connected: this.sessions.size > 0, locale: this.locale() })
     }
 
     if (request.method === 'GET' && url.pathname === '/desktop/tunnel/status') {

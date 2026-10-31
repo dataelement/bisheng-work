@@ -1,3 +1,4 @@
+import type { EnterpriseWebSession } from './web-session'
 import { join } from 'node:path'
 import { parseThirdPartyPolicy } from 'dsh-desktop-enterprise/contract'
 import { sweepWorkbenchVerifyDirectory } from './workbench-artifact'
@@ -15,6 +16,8 @@ import {
 
 export interface EnterpriseDesktopRuntime {
   snapshot(): EnterprisePublicState
+  webSession(connectionKey: string): Promise<EnterpriseWebSession>
+  subscribe(listener: (state: EnterprisePublicState) => void): () => void
   readThirdPartyPolicy(): Promise<{ allowThirdPartyPlugins: boolean, allowThirdPartyWorkbenches: boolean }>
   harnessEnvironment(): NodeJS.ProcessEnv
   rotateCapability(): void
@@ -35,7 +38,14 @@ export async function startEnterpriseDesktop(options: {
     join(options.userDataPath, ENTERPRISE_VAULT_FILENAME),
     options.safeStorage
   )
+  const listeners = new Set<(state: EnterprisePublicState) => void>()
   const service = new EnterpriseService({
+    onStateChange: (state) => {
+      for (const listener of listeners) {
+        try { listener(state) }
+        catch { options.note?.('[enterprise] state_listener_failed') }
+      }
+    },
     desktopVersion: options.desktopVersion,
     activateDesktop: options.activateDesktop,
     vault,
@@ -65,6 +75,8 @@ export async function startEnterpriseDesktop(options: {
 
   return {
     snapshot: () => service.snapshot(),
+    webSession: (key) => service.webSession(key),
+    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
     async readThirdPartyPolicy() {
       const closed = { allowThirdPartyPlugins: false, allowThirdPartyWorkbenches: false }
       const state = service.snapshot()

@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { officeTarget, downloadAsset, unpackWheel, prepareOfficeRuntime } from '../scripts/office-runtime/prepare.mjs'
-import { officeCliAttempts, officeCliCommand, officeCliTimedOut, officeCliTimeoutMs, runOfficeCli } from '../scripts/office-runtime/prepare-templates.mjs'
+import { officeCliAttempts, officeCliCommand, officeCliRetriable, officeCliTimedOut, officeCliTimeoutMs, runOfficeCli } from '../scripts/office-runtime/prepare-templates.mjs'
 import { HarnessRuntime } from '../src/main/runtime/harness-runtime'
 import { prepareHostPluginSourcesPatch } from '../src/main/state/host-plugin-sources'
 import { ensureSafeModeProfile, SAFE_MODE_PROFILE } from '../src/main/state/safe-mode-profile'
@@ -49,6 +49,10 @@ describe('Office template preview limits', () => {
     expect(officeCliTimedOut(kitTimeout(Buffer.from(hung.stderr)))).toBe(true)
     expect(officeCliTimedOut(Object.assign(new Error('killed'), { killed: true, signal: 'SIGTERM' }))).toBe(true)
     expect(officeCliTimedOut(kitTimeout('{"code":"invalid-document","error":"bad workbook"}'))).toBe(false)
+    const missingPackage = kitTimeout(`{"code":"failed","error":"Cannot find package 'unicode-properties' imported from /work/node_modules/fontkit/dist/module.mjs"}\n`)
+    const invalidDocument = kitTimeout('{"code":"invalid-document","error":"bad workbook"}')
+    expect(officeCliRetriable(missingPackage)).toBe(true)
+    expect(officeCliRetriable(invalidDocument)).toBe(false)
 
     let calls = 0
     await expect(runOfficeCli('recalculate', async () => {
@@ -59,13 +63,21 @@ describe('Office template preview limits', () => {
     expect(calls).toBe(3)
 
     await expect(runOfficeCli('recalculate', async () => { throw hung })).rejects.toBe(hung)
-    const invalid = kitTimeout('{"code":"invalid-document","error":"bad workbook"}')
     let invalidCalls = 0
+    const invalid = invalidDocument
     await expect(runOfficeCli('render', async () => {
       invalidCalls += 1
       throw invalid
     })).rejects.toBe(invalid)
     expect(invalidCalls).toBe(1)
+
+    let missingCalls = 0
+    await expect(runOfficeCli('render', async () => {
+      missingCalls += 1
+      if (missingCalls < 2) throw missingPackage
+      return { ok: true }
+    })).resolves.toEqual({ ok: true })
+    expect(missingCalls).toBe(2)
   })
 })
 

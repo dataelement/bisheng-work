@@ -13,19 +13,75 @@ window.__ModuleLoader__.load({
     const LEARN_MORE_URL = 'https://dshdesktop.com/zh/enterprise/deployment/'
     const OPEN_SETTINGS_SECTION_EVENT = 'dsh-desktop:open-settings-section'
     const NS = 'settings.desktopEnterprise'
+    const SAFETY_NS = 'enterprise.contentSafety'
+    const safetyCopy = {
+      zh: {
+        CONTENT_FILTERED: '内容包含敏感词，本次请求已停止。',
+        CONTENT_CHECK_UNAVAILABLE: '暂时无法检查内容，请稍后重试。'
+      },
+      en: {
+        CONTENT_FILTERED: 'This request was stopped because sensitive words were detected.',
+        CONTENT_CHECK_UNAVAILABLE: 'Content checking is temporarily unavailable. Try again later.'
+      },
+      ja: {
+        CONTENT_FILTERED: '制限された語句が検出されたため、このリクエストを停止しました。',
+        CONTENT_CHECK_UNAVAILABLE: '現在、コンテンツを確認できません。しばらくしてから再試行してください。'
+      }
+    }
+
+    function bindContentSafetyLocale(locale) {
+      // Cookies are not port scoped; include the full authority in this display-only bridge.
+      const name = 'dshEnterpriseSafetyLocale_' + encodeURIComponent(window.location.host.toLowerCase())
+      const t = locale.bind(SAFETY_NS)
+      const attributes = '; Path=/; SameSite=Strict' + (window.location.protocol === 'https:' ? '; Secure' : '')
+      const owner = window.crypto.randomUUID()
+      let owned
+      let publishedCopy
+      const publish = () => {
+        const messages = {
+          CONTENT_FILTERED: t('CONTENT_FILTERED'),
+          CONTENT_CHECK_UNAVAILABLE: t('CONTENT_CHECK_UNAVAILABLE')
+        }
+        const copy = JSON.stringify(messages)
+        if (copy === publishedCopy) return
+        const value = encodeURIComponent(JSON.stringify({ owner, messages }))
+        document.cookie = name + '=' + value + attributes
+        owned = value
+        publishedCopy = copy
+      }
+      publish()
+      const unsubscribe = locale.subscribe(publish)
+      return () => {
+        unsubscribe()
+        const current = document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith(name + '='))
+        if (current === name + '=' + owned) document.cookie = name + '=; Max-Age=0' + attributes
+      }
+    }
 
     const zh = {
-      nav: '企业账号',
-      title: '企业账号',
+      seat_not_assigned: '当前服务版本不支持直接登录，请联系管理员升级平台。',
+      seat_revoked: '当前登录已失效，请重新登录。',
+      seat_limit_reached: '当前平台仍启用了旧版接入限制，请联系管理员升级。',
+
+      nav: '账号与用量',
+      title: '账号与用量',
+      managedModels: '企业提供的模型',
       accountLabel: '当前账号',
-      platform: '企业服务地址',
+      platform: '企业平台地址',
+      signInTitle: '登录企业账号',
+      signInIntro: '登录后可使用聊天，以及企业为你授权的模型、工具和技能。',
+      platformHelp: '填写你平时访问企业平台的地址，也可以向管理员获取。',
+      browserHelp: '下一步将在浏览器中打开企业平台登录页。',
+      authorizationHelp: '请在浏览器中完成登录并授权，再回到客户端继续。',
+      manualHelp: '已经在浏览器中完成授权？也可以粘贴页面提供的一次性登录码。',
       login: '在浏览器中登录',
       loginAgain: '重新登录',
       loggingIn: '等待浏览器授权…',
       learnMore: '了解企业版',
       vision: '视觉',
       visionHint: '企业已开启图片输入',
-      usageLabel: '已用 / 额度（Token）',
+      usageLabel: '剩余积分',
+      creditsHelp: 'Chat 和 Work 共用积分，每月重置。',
       ticket: '一次性登录码',
       submitTicket: '完成登录',
       refresh: '刷新',
@@ -34,10 +90,10 @@ window.__ModuleLoader__.load({
       modelAvailable: '可用',
       noModels: '暂无可用模型，请联系管理员授权。',
       usageUnavailable: '用量暂不可用',
-      limitZero: '额度为 0，模型调用已停用',
+      limitZero: '剩余 0 分',
       secureUnavailable: '系统安全存储不可用，企业登录已停用。',
-      confirmTitle: '确认毕昇平台',
-      confirmLead: '确认后会停用当前企业模型连接，并在该平台新建一次 PKCE 登录。',
+      confirmTitle: '确认企业平台',
+      confirmLead: '确认后将切换到以下企业平台，并在浏览器中登录。',
       insecureTitle: '确保服务地址可信',
       insecureLead: '登录信息会明文传输，确保以下服务地址由可信来源提供。',
       confirm: '确认并登录',
@@ -52,9 +108,6 @@ window.__ModuleLoader__.load({
       refresh_token_reused: '登录状态已失效，请重新登录。',
       session_expired: '登录会话已过期，请重新登录。',
       session_revoked: '本次登录会话已失效，请重新登录。',
-      seat_not_assigned: '当前服务版本不支持直接登录，请联系管理员升级平台。',
-      seat_revoked: '当前登录已失效，请重新登录。',
-      seat_limit_reached: '当前平台仍启用了旧版接入限制，请联系管理员升级。',
       license_invalid: '平台客户端授权无效，请联系管理员。',
       license_expired: '平台客户端授权已过期，请联系管理员。',
       dsh_disabled: '管理员已关闭客户端功能，请联系管理员。',
@@ -65,7 +118,7 @@ window.__ModuleLoader__.load({
       internal_error: '平台服务异常，请稍后重试或联系管理员。',
       access_denied: '你已取消本次登录授权。',
       authorization_failed: '本次登录授权失败，请重新发起登录。',
-      network_error: '无法连接毕昇平台，请检查地址和网络。',
+      network_error: '无法连接企业平台，请检查地址和网络。',
       invalid_response: '平台响应异常，请检查服务地址或联系管理员。',
       contract_incompatible: '客户端与平台版本不兼容，请联系管理员更新。',
       model_not_allowed: '当前模型未获授权或已不可用，请刷新模型列表或联系管理员。',
@@ -73,17 +126,29 @@ window.__ModuleLoader__.load({
     }
 
     const en = {
-      nav: 'Enterprise',
-      title: 'Enterprise account',
+      seat_not_assigned: 'This server uses a legacy sign-in policy. Ask your administrator to upgrade the platform.',
+      seat_revoked: 'Your sign-in is no longer valid. Sign in again.',
+      seat_limit_reached: 'This server still enforces a legacy access limit. Ask your administrator to upgrade.',
+
+      nav: 'Account and usage',
+      title: 'Account and usage',
+      managedModels: 'Models provided by your enterprise',
       accountLabel: 'Current account',
-      platform: 'Enterprise service URL',
+      platform: 'Enterprise platform URL',
+      signInTitle: 'Sign in to your enterprise account',
+      signInIntro: 'Sign in to use Chat and the models, tools, and skills authorized by your organization.',
+      platformHelp: 'Enter the URL you normally use for your enterprise platform, or ask your administrator for it.',
+      browserHelp: 'The next step opens the enterprise platform sign-in page in your browser.',
+      authorizationHelp: 'Complete sign-in and authorization in your browser, then return to the app to continue.',
+      manualHelp: 'Already authorized in your browser? You can also paste the one-time code provided on that page.',
       login: 'Sign in in browser',
       loginAgain: 'Sign in again',
       loggingIn: 'Waiting for browser authorization…',
       learnMore: 'Learn about Enterprise',
       vision: 'Vision',
       visionHint: 'Image input enabled by your enterprise',
-      usageLabel: 'Used / limit (tokens)',
+      usageLabel: 'Credits remaining',
+      creditsHelp: 'Chat and Work share credits, reset monthly.',
       ticket: 'One-time code',
       submitTicket: 'Complete sign-in',
       refresh: 'Refresh',
@@ -94,8 +159,8 @@ window.__ModuleLoader__.load({
       usageUnavailable: 'Usage unavailable',
       limitZero: 'Limit is 0; model calls are disabled',
       secureUnavailable: 'Operating-system secure storage is unavailable. Enterprise sign-in is disabled.',
-      confirmTitle: 'Confirm BiSheng platform',
-      confirmLead: 'Continuing pauses the current enterprise connection and starts a new PKCE login at this platform.',
+      confirmTitle: 'Confirm enterprise platform',
+      confirmLead: 'Continue to switch to this enterprise platform and sign in through your browser.',
       insecureTitle: 'Make sure the service URL is trusted',
       insecureLead: 'Sign-in details will be sent in cleartext. Make sure the following service URL comes from a trusted source.',
       confirm: 'Confirm and sign in',
@@ -110,9 +175,6 @@ window.__ModuleLoader__.load({
       refresh_token_reused: 'Your sign-in state is no longer valid. Sign in again.',
       session_expired: 'Your sign-in session has expired. Sign in again.',
       session_revoked: 'This sign-in session is no longer valid. Sign in again.',
-      seat_not_assigned: 'This server uses a legacy sign-in policy. Ask your administrator to upgrade the platform.',
-      seat_revoked: 'Your sign-in is no longer valid. Sign in again.',
-      seat_limit_reached: 'This server still enforces a legacy access limit. Ask your administrator to upgrade.',
       license_invalid: 'The platform client license is invalid. Contact your administrator.',
       license_expired: 'The platform client license has expired. Contact your administrator.',
       dsh_disabled: 'An administrator has turned off the client. Contact your administrator.',
@@ -123,7 +185,7 @@ window.__ModuleLoader__.load({
       internal_error: 'The platform service failed. Try again later or contact an administrator.',
       access_denied: 'You cancelled this sign-in.',
       authorization_failed: 'This sign-in authorization failed. Start sign-in again.',
-      network_error: 'Could not reach the BiSheng platform. Check the service address and your network.',
+      network_error: 'Could not reach the enterprise platform. Check the service address and your network.',
       invalid_response: 'The platform returned an unexpected response. Check the service address or contact your administrator.',
       contract_incompatible: 'This client is incompatible with the platform. Ask your administrator to update it.',
       model_not_allowed: 'This model is not authorized or is unavailable. Refresh the model list or contact your administrator.',
@@ -158,6 +220,10 @@ window.__ModuleLoader__.load({
           font-weight: 600;
           line-height: normal;
         }
+        .dshEnterpriseLoginIntro { margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: var(--dsw-alias-label-secondary); }
+        .dshEnterpriseLoginHelp { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--dsw-alias-label-secondary); }
+        .dshEnterprisePendingCopy { flex: 1; }
+        .dshEnterpriseManagedModels { margin: 16px 0; }
         .dshEnterprise h3 {
           margin: 0 0 8px;
           font-size: 14px;
@@ -223,8 +289,7 @@ window.__ModuleLoader__.load({
         .dshEnterpriseLearnMoreShell {
           display: inline-flex;
         }
-        .dshEnterpriseLearnMore,
-        .dshEnterpriseLogout {
+        .dshEnterpriseLearnMore {
           display: inline-flex;
           align-items: center;
           gap: 5px;
@@ -239,14 +304,9 @@ window.__ModuleLoader__.load({
           cursor: pointer;
           white-space: nowrap;
         }
-        .dshEnterpriseLearnMore:hover,
-        .dshEnterpriseLogout:hover {
+        .dshEnterpriseLearnMore:hover {
           color: var(--dsw-alias-label-primary);
           background: var(--dsw-alias-interactive-bg-hover);
-        }
-        .dshEnterpriseLogout:disabled {
-          opacity: .5;
-          cursor: default;
         }
         .dshEnterpriseLearnMore:focus-visible,
         .dshEnterpriseLogout:focus-visible,
@@ -257,22 +317,31 @@ window.__ModuleLoader__.load({
         .dshEnterpriseIdentity {
           display: flex;
           align-items: center;
+          flex-direction: column;
           gap: 12px;
-          padding: 16px 0 20px;
-          border-bottom: 1px solid color-mix(in srgb, var(--dsw-alias-border-l4) 40%, transparent);
+          padding: 20px 0 28px;
+          text-align: center;
         }
         .dshEnterpriseAvatar {
           display: grid;
           place-items: center;
-          flex: 0 0 38px;
-          width: 38px;
-          height: 38px;
-          border-radius: 10px;
+          flex: none;
+          width: 64px;
+          height: 64px;
+          border-radius: 50%;
+          font-size: 22px;
+          font-weight: 500;
           color: var(--dsw-alias-label-secondary);
           background: var(--dsw-alias-interactive-bg-hover);
         }
-        .dshEnterpriseLogout {
-          margin-left: auto;
+        /* Keep sign-out as the final, explicitly destructive account action. */
+        .dshEnterprise .dshEnterpriseLogout {
+          margin: 16px 0 8px;
+          color: var(--dsw-alias-state-error-primary);
+        }
+        .dshEnterprise .dshEnterpriseLogout:hover:not(:disabled),
+        .dshEnterprise .dshEnterpriseLogout:focus-visible:not(:disabled) {
+          background: var(--dsw-alias-interactive-bg-hover-danger);
         }
         .dshEnterpriseAccount {
           display: grid;
@@ -334,26 +403,24 @@ window.__ModuleLoader__.load({
         }
         .dshEnterpriseModels {
           display: grid;
-          margin: 8px 0 0;
+          gap: 8px;
+          margin: 12px 0 0;
           padding: 0;
           list-style: none;
         }
         .dshEnterpriseModels li {
           box-sizing: border-box;
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px 20px;
-          min-height: 64px;
-          padding: 14px 0;
+          min-width: 0;
+          border: .5px solid var(--dsw-alias-settings-card-stroke);
+          border-radius: var(--dsw-radius-xl);
+          background: var(--dsw-alias-settings-card-fill);
+          padding: 12px 14px;
           font-size: 14px;
           line-height: 22px;
         }
         .dshEnterpriseModelIdentity {
           display: grid;
-          gap: 4px;
-          flex: 1 1 180px;
+          gap: 2px;
           min-width: 0;
         }
         .dshEnterpriseModelTitle {
@@ -398,24 +465,6 @@ window.__ModuleLoader__.load({
         }
         .dshEnterpriseModelVision svg {
           flex: none;
-        }
-        .dshEnterpriseModelUsage {
-          margin-left: auto;
-          text-align: right;
-          color: var(--dsw-alias-label-secondary);
-          font-size: 13px;
-          line-height: 20px;
-          font-variant-numeric: tabular-nums;
-          white-space: nowrap;
-        }
-        .dshEnterpriseModelUsagePercent {
-          display: none;
-        }
-        .dshEnterpriseModels li:hover .dshEnterpriseModelUsageValue {
-          display: none;
-        }
-        .dshEnterpriseModels li:hover .dshEnterpriseModelUsagePercent {
-          display: inline;
         }
         .dshEnterpriseModels.paused {
           opacity: .5;
@@ -664,6 +713,36 @@ window.__ModuleLoader__.load({
       }
     }
 
+    function bindEnterpriseModelSync() {
+      let pending, disposed = false
+      const sync = () => {
+        if (disposed || document.visibilityState !== 'visible' || pending) return
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), 30_000)
+        pending = { controller, timeout }
+        void api('/api/enterprise.models.refresh', {}, controller.signal).catch(error => {
+          if (!disposed && !controller.signal.aborted) console.warn('[enterprise-models] Catalog refresh failed', error)
+        }).finally(() => {
+          window.clearTimeout(timeout)
+          if (pending?.controller === controller) pending = undefined
+        })
+      }
+      const timer = window.setInterval(sync, 30_000)
+      window.addEventListener('focus', sync)
+      document.addEventListener('visibilitychange', sync)
+      window.addEventListener(ACCOUNT_CHANGED_EVENT, sync)
+      sync()
+      return () => {
+        disposed = true
+        pending?.controller.abort()
+        window.clearTimeout(pending?.timeout)
+        window.clearInterval(timer)
+        window.removeEventListener('focus', sync)
+        document.removeEventListener('visibilitychange', sync)
+        window.removeEventListener(ACCOUNT_CHANGED_EVENT, sync)
+      }
+    }
+
     async function api(path, body, signal) {
       const response = await fetch(path, {
         method: body === undefined ? 'GET' : 'POST',
@@ -682,23 +761,14 @@ window.__ModuleLoader__.load({
       return payload
     }
 
-    function tokenAmount(value, language) {
-      const zhLocale = String(language || '').toLowerCase().startsWith('zh')
-      if (!zhLocale) {
-        return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(value)
-      }
-      if (value === 0) return '0'
-      if (value < 100) return '<0.01万'
-      return `${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value / 10_000)}万`
-    }
-
     function usageText(usage, language, t) {
       if (!usage || usage.source === 'unavailable' || usage.quota_state === 'unavailable') {
         return t('usageUnavailable')
       }
-      if (usage.limit === 0) return t('limitZero')
+      const formatter = new Intl.NumberFormat(language || 'en', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+      if (usage.limit === 0) return formatter.format(0)
       if (usage.used === null || usage.limit === null) return t('usageUnavailable')
-      return `${tokenAmount(usage.used, language)} / ${tokenAmount(usage.limit, language)}`
+      return formatter.format(Math.max(0, usage.limit - usage.used) / 1_000_000)
     }
 
     function readLastBase() {
@@ -726,9 +796,6 @@ window.__ModuleLoader__.load({
     }
 
     const LEGACY_ACCOUNT_PHRASES = {
-      'seat not assigned': 'seat_not_assigned',
-      'seat revoked': 'seat_revoked',
-      'dsh seat revoked': 'seat_revoked',
       'session revoked': 'session_revoked',
       'dsh session revoked': 'session_revoked',
       'session expired': 'session_expired',
@@ -741,6 +808,9 @@ window.__ModuleLoader__.load({
       'refresh token reuse detected; sign in again': 'refresh_token_reused',
       'authorization unavailable': 'authorization_unavailable',
       'dsh authorization is temporarily unavailable': 'authorization_unavailable',
+      'seat not assigned': 'seat_not_assigned',
+      'seat revoked': 'seat_revoked',
+      'dsh seat revoked': 'seat_revoked',
       'invalid grant': 'invalid_grant',
       'pkce verification failed': 'pkce_verification_failed',
       'authorization expired': 'authorization_expired',
@@ -789,16 +859,6 @@ window.__ModuleLoader__.load({
         ? cause.errorCode
         : ''
       return { message, code }
-    }
-
-    function modelUsagePercentage(usage, language, t) {
-      if (!usage || typeof usage.used !== 'number' || typeof usage.limit !== 'number' || usage.limit <= 0) {
-        return usageText(usage, language, t)
-      }
-      const zhLocale = String(language || '').toLowerCase().startsWith('zh')
-      const percentage = Math.min(100, Math.max(0, usage.used / usage.limit * 100))
-      const formatted = new Intl.NumberFormat(zhLocale ? 'zh-CN' : 'en-US', { maximumFractionDigits: 1 }).format(percentage)
-      return `${formatted}%`
     }
 
     function readUiLanguage() {
@@ -860,17 +920,14 @@ window.__ModuleLoader__.load({
 
     function renderModelRow(model, state, language, t) {
       const display = modelDisplayParts(model.display_name)
-      const usage = state.modelUsage?.[model.id]
-      const value = usageText(usage, language, t)
-      const percentage = modelUsagePercentage(usage, language, t)
-      const usageTitle = `${t('usageLabel')}: ${value} · ${percentage}`
+      const usage = state.usage
       const vision = model.capabilities?.vision === true
         ? h('span', { className: 'dshEnterpriseModelVision', title: t('visionHint') },
           createVisionIcon(),
           t('vision'))
         : null
 
-      return h('li', { key: model.id, title: usageTitle },
+      return h('li', { key: model.id },
         h('span', { className: 'dshEnterpriseModelIdentity' },
           h('span', { className: 'dshEnterpriseModelTitle' },
             h('span', { className: 'dshEnterpriseModelName', title: model.display_name }, display.name),
@@ -880,13 +937,10 @@ window.__ModuleLoader__.load({
             }) : null),
           display.provider || vision ? h('span', { className: 'dshEnterpriseModelDetails' },
             display.provider ? h('span', { className: 'dshEnterpriseModelProvider' }, display.provider) : null,
-            vision) : null),
-        h('span', { className: 'dshEnterpriseModelUsage', 'aria-label': usageTitle },
-          h('span', { className: 'dshEnterpriseModelUsageValue' }, value),
-          h('span', { className: 'dshEnterpriseModelUsagePercent', 'aria-hidden': 'true' }, percentage)))
+            vision) : null))
     }
 
-    function EnterpriseSection({ t }) {
+    function EnterpriseSection({ t, renderSlot }) {
       const [state, setState] = useState(null)
       const [base, setBase] = useState(readLastBase)
       const [ticket, setTicket] = useState('')
@@ -997,28 +1051,27 @@ window.__ModuleLoader__.load({
       const userLabel = state?.user?.display_name || state?.user?.username || state?.user?.id || '—'
       const language = readUiLanguage()
 
+      const logoutButton = connected && h(require('@deepseek-ai/dsh-client-ui-primitives').Button, {
+        variant: 'ghost', size: 'md',
+        className: 'dshEnterpriseLogout', disabled: busy,
+        onClick: () => run(async () => {
+          const next = await api('/api/enterprise.logout', {})
+          setConfirmation(null)
+          applyAccountState(next)
+        })
+      }, t('logout'))
       const status = connected
         ? h('div', { className: 'dshEnterpriseIdentity' },
-          h('span', { className: 'dshEnterpriseAvatar', 'aria-hidden': 'true' }, createAccountIcon()),
+          h('span', { className: 'dshEnterpriseAvatar', 'aria-hidden': 'true' }, String(userLabel).slice(0, 2).toLocaleUpperCase()),
           h('div', { className: 'dshEnterpriseAccount' },
-            h('span', { className: 'dshEnterpriseAccountLabel' }, t('accountLabel')),
-            h('span', null, userLabel)),
-          h('button', {
-            className: 'dshEnterpriseLogout',
-            type: 'button',
-            disabled: busy,
-            onClick: () => run(async () => {
-              const next = await api('/api/enterprise.logout', {})
-              setConfirmation(null)
-              applyAccountState(next)
-            })
-          }, t('logout')))
+            h('strong', null, userLabel),
+            h('span', { className: 'dshEnterpriseAccountLabel' }, state?.user?.username || t('accountLabel'))))
         : null
 
       const accountContent = connected
         ? h(React.Fragment, null,
           h('div', { className: 'dshEnterpriseSectionHeader' },
-            h('h3', null, t('models')),
+            h('h3', null, t('managedModels')),
             h('button', {
               className: 'dshEnterpriseIconButton',
               type: 'button',
@@ -1039,6 +1092,7 @@ window.__ModuleLoader__.load({
               type: 'url',
               inputMode: 'url',
               autoComplete: 'url',
+              'aria-describedby': 'dsh-enterprise-platform-help',
               placeholder: 'https://bisheng.example.com',
               value: base,
               onChange: (event) => {
@@ -1046,14 +1100,17 @@ window.__ModuleLoader__.load({
                 rememberBase(event.target.value)
               }
             })),
+          h('p', { id: 'dsh-enterprise-platform-help', className: 'dshEnterpriseLoginHelp' }, t('platformHelp')),
           state?.secureStorageAvailable === false
             ? h('p', { className: 'dshEnterpriseError' }, t('secureUnavailable'))
             : h(React.Fragment, null,
               state?.phase === 'authorizing'
                 ? h('div', { className: 'dshEnterprisePending', role: 'status', 'aria-live': 'polite' },
-                  h('span', null, t('loggingIn')),
+                  h('div', { className: 'dshEnterprisePendingCopy' },
+                    h('span', null, t('loggingIn')),
+                    h('p', { className: 'dshEnterpriseLoginHelp' }, t('authorizationHelp'))),
                   h('span', { className: 'dshEnterprisePendingSpinner', 'aria-hidden': 'true' }, '↻'))
-                : null,
+                : h('p', { className: 'dshEnterpriseLoginHelp' }, t('browserHelp')),
               h('div', { className: 'dshEnterpriseActions' },
                 h('button', {
                   className: 'dshEnterpriseButton login',
@@ -1073,6 +1130,7 @@ window.__ModuleLoader__.load({
 
       const manualFallback = !connected && manualFallbackReady
         ? h('div', { className: 'dshEnterpriseManual' },
+          h('p', { className: 'dshEnterpriseLoginHelp' }, t('manualHelp')),
           h('label', { className: 'dshEnterpriseLabel' },
             t('ticket'),
             h('input', {
@@ -1134,10 +1192,18 @@ window.__ModuleLoader__.load({
 
       return h('section', { className: 'dshEnterprise' },
         h('div', { className: 'dshEnterpriseTitleRow' },
-          h('h2', null, t('title')),
+          h('h2', null, t(connected ? 'title' : 'signInTitle')),
           renderLearnMoreButton(t)),
+        connected ? null : h('p', { className: 'dshEnterpriseLoginIntro' }, t('signInIntro')),
         status,
-        accountContent,
+        connected && renderSlot?.('desktop.account.usage', {
+          credits: usageText(state.usage, document.documentElement.lang, t),
+          creditsLabel: t('usageLabel'), creditsHelp: t('creditsHelp'),
+          models: h('section', { className: 'dshEnterpriseManagedModels' }, accountContent)
+        }, { fallback: h(React.Fragment, null,
+          h('p', { title: t('creditsHelp') }, `${t('usageLabel')}: ${usageText(state.usage, document.documentElement.lang, t)}`),
+          h('section', { className: 'dshEnterpriseManagedModels' }, accountContent)) }),
+        connected ? logoutButton : accountContent,
         manualFallback,
         errorPanel,
         confirmationPanel)
@@ -1145,17 +1211,40 @@ window.__ModuleLoader__.load({
 
     const inject = ['slots', 'locale']
 
+    function bindWorkToolChanges() {
+      const bridge = window.dshEnterpriseChat
+      if (!bridge?.onToolsChanged) return undefined
+      const controller = new AbortController()
+      const unsubscribe = bridge.onToolsChanged(() => {
+        void fetch('/api/enterprise.work-tools', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ operation: 'refresh' }), signal: controller.signal
+        }).then(async response => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          await response.body?.cancel()
+        }).catch(error => {
+          if (controller.signal.aborted) return
+          console.warn('Enterprise tool refresh failed; the next model request will retry.', error)
+        })
+      })
+      return () => { unsubscribe(); controller.abort() }
+    }
+
     function apply(ctx) {
+      ctx.effect(bindWorkToolChanges, 'enterprise: refresh saved tool availability')
       installStyles()
       installMarketStyles()
       ctx.effect(
         () => ctx.locale.register(NS, { zh, en }),
         'dsh-desktop-enterprise: copy dictionaries'
       )
+      ctx.effect(() => ctx.locale.register(SAFETY_NS, safetyCopy), 'enterprise: content safety translations')
+      ctx.effect(() => bindContentSafetyLocale(ctx.locale), 'enterprise: current content safety locale')
       const t = ctx.locale.bind(NS)
       accountTranslate = t
       ctx.effect(() => ctx.locale.register('settings.enterpriseMarket', { zh: marketZh, en: marketEn }), 'enterprise-market: translations')
       marketTranslate = ctx.locale.bind('settings.enterpriseMarket')
+      ctx.effect(() => bindEnterpriseModelSync(), 'enterprise: foreground model catalog sync')
       ctx.effect(() => bindEnterpriseMarketTab(ctx), 'enterprise-market: account-bound plugins tab')
       ctx.effect(() => {
         const bridge = window.dshDesktopEnterprise
@@ -1167,6 +1256,7 @@ window.__ModuleLoader__.load({
         id: ENTERPRISE_SECTION_ID,
         order: 15,
         label: () => t('nav'),
+        children: { 'desktop.account.usage': { kind: 'single', scope: 'root' } },
         inject: () => ({ t })
       }, EnterpriseSection))
     }

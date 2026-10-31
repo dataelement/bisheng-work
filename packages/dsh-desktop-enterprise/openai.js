@@ -1,4 +1,5 @@
 import { normalizeAuditContext } from './contract.js'
+import { CONTENT_SAFETY_ERROR_COPY, resolveContentSafetyError } from './error-copy.js'
 import {
   LlmAdapter,
   LlmError,
@@ -423,11 +424,48 @@ function requestIdFrom(headerId, payload) {
   return typeof bodyId === 'string' && bodyId.length > 0 ? bodyId : undefined
 }
 
-function requestFailure(status, requestId, payload) {
-  const resolvedId = requestIdFrom(requestId, payload)
+const GATEWAY_CHECK_UNAVAILABLE_MESSAGES = new Set([
+  'Content safety check unavailable',
+  'Content check unavailable'
+])
+
+function contentSafetyMessage(safety, locale, localizeContentSafety) {
+  const fallback = CONTENT_SAFETY_ERROR_COPY[safety.code][locale]
+  const gatewayDefault = safety.code === 'CONTENT_CHECK_UNAVAILABLE' && GATEWAY_CHECK_UNAVAILABLE_MESSAGES.has(safety.message)
+  // Every explicit blocked reply belongs to the tenant, including text equal to fixed copy.
+  if (safety.message && !gatewayDefault) return safety.message
+  if (typeof localizeContentSafety !== 'function') return safety.message ?? fallback
+  try {
+    const localized = localizeContentSafety(safety.code, fallback)
+    if (typeof localized === 'string') {
+      const safe = resolveContentSafetyError(safety.code, localized)?.message
+      if (safe) return safe
+    } else {
+      // Optional async display results are ignored, but their rejection must be observed.
+      void Promise.resolve(localized).catch(() => {})
+    }
+  } catch {
+    // Localization is optional; a failing hook cannot replace or leak the safety failure.
+  }
+  return fallback
+}
+
+export function requestFailure(status, requestId, payload, localizeContentSafety) {
+  console.warn('[enterprise] model response failed', {
+    status, requestId: requestIdFrom(requestId, payload),
+    code: platformChatCode(payload), message: sanitizeChatMessage(rawChatMessage(payload))
+  })
+  const safety = resolveContentSafetyError(payloadError(payload)?.code, rawChatMessage(payload))
+    ?? resolveContentSafetyError(payload?.code, payload?.message)
+    ?? resolveContentSafetyError(payload?.errorCode, rawChatMessage(payload))
+  const safetyBodyId = typeof payload?.request_id === 'string' && payload.request_id.trim() ? payload.request_id : undefined
+  const resolvedId = safety ? safetyBodyId ?? requestIdFrom(requestId, null) : requestIdFrom(requestId, payload)
+  const language = readUiLanguage().toLowerCase()
+  const locale = language.startsWith('zh') ? 'zh' : language.startsWith('ja') ? 'ja' : 'en'
   return new LlmError(
-    formatEnterpriseChatFailure(status, payload, readUiLanguage()),
-    classifyChatFailure(platformChatCode(payload), status),
+    safety ? contentSafetyMessage(safety, locale, localizeContentSafety)
+      : formatEnterpriseChatFailure(status, payload, language),
+    safety?.code ?? classifyChatFailure(platformChatCode(payload), status),
     {
       status,
       ...(resolvedId ? { requestId: ProviderRequestId(resolvedId) } : {})
@@ -435,9 +473,27 @@ function requestFailure(status, requestId, payload) {
   )
 }
 
-export async function responseFailure(response) {
+export async function responseFailure(response, localizeContentSafety) {
   const payload = await response.json().catch(() => ({}))
-  return requestFailure(response.status, response.headers.get('x-request-id') ?? undefined, payload)
+  return requestFailure(response.status, response.headers.get('x-request-id') ?? undefined, payload, localizeContentSafety)
+}
+
+export function contentSafetyFormatterForStream(options, hooks) {
+  const fallback = hooks.localizeContentSafety
+  try {
+    if (typeof hooks.contentSafetyFormatterFor !== 'function') return fallback
+    const formatter = hooks.contentSafetyFormatterFor({
+      sessionId: options.sessionId,
+      purpose: options.purpose ?? 'chat'
+    })
+    if (typeof formatter === 'function') return formatter
+    // Observe invalid async results without adopting them or leaking a rejected Promise.
+    void Promise.resolve(formatter).catch(() => {})
+    return fallback
+  } catch {
+    // Display context is optional and cannot interrupt ordinary model requests.
+    return fallback
+  }
 }
 
 function validUsage(value) {
@@ -475,14 +531,17 @@ function optionalTokenCount(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : undefined
 }
 
-function finishReason(value) {
+function finishReason(value, payload, requestId, localizeContentSafety) {
   if (value === 'stop') return { kind: 'stop' }
   if (value === 'length') return { kind: 'max-tokens' }
   if (value === 'tool_calls') return { kind: 'tool-calls' }
   if (value === 'content_filter') {
     return {
       kind: 'error',
-      failure: { message: 'BiSheng filtered the model response.', code: 'CONTENT_FILTERED' }
+      failure: requestFailure(200, requestId, {
+        error: { code: 'content_blocked', message: payload?.content_safety?.message },
+        request_id: payload?.request_id
+      }, localizeContentSafety).failure
     }
   }
   return undefined
@@ -496,6 +555,8 @@ export class EnterpriseLlmAdapter extends LlmAdapter {
    * @param {() => readonly string[]} [options.auditFields] Current trusted connection capability; not persisted.
    * @param {Function} options.request Existing credential broker transport.
    * @param {Function} [options.readImage]
+   * @param {(code: string, defaultMessage: string) => string} [options.localizeContentSafety] Current UI locale's fixed safety copy.
+   * @param {Function} [options.contentSafetyFormatterFor] Synchronous factory captured once per protocol stream.
    * @param {Function} [options.onComplete]
    */
   constructor(options) {
@@ -549,6 +610,7 @@ export class EnterpriseLlmAdapter extends LlmAdapter {
       yield* streamEnterpriseResponses(options, model, this.options, connectionKey, session)
       return
     }
+    const localizeContentSafety = contentSafetyFormatterForStream(options, this.options)
     const history = model.capabilities.vision
       ? projectEnterpriseOffloadedImages(options.messages)
       : projectEnterpriseMessagesForTextModel(options.messages)
@@ -583,7 +645,7 @@ export class EnterpriseLlmAdapter extends LlmAdapter {
       options.signal,
       headers
     )
-    if (!response.ok) throw await responseFailure(response)
+    if (!response.ok) throw await responseFailure(response, localizeContentSafety)
     const contentType = response.headers.get('content-type') ?? ''
     if (!contentType.toLowerCase().startsWith('text/event-stream')) {
       throw new LlmError('BiSheng returned a non-SSE model response.', 'INVALID_RESPONSE', {
@@ -620,9 +682,9 @@ export class EnterpriseLlmAdapter extends LlmAdapter {
         for (const block of blocks) {
           if (block.type === 'text') yield { type: 'block-end', index: block.index, block: { type: 'text', text: block.text } }
           else if (block.type === 'reasoning') yield { type: 'block-end', index: block.index, block: { type: 'reasoning', text: block.text } }
-          else yield { type: 'block-end', index: block.index, block: { type: 'tool-call', id: ToolCallId(block.id), name: block.name, arguments: block.arguments } }
         }
-        const failure = requestFailure(200, payload?.request_id, payload)
+        tools.clear()
+        const failure = requestFailure(200, response.headers.get('x-request-id') ?? undefined, payload, localizeContentSafety)
         yield { type: 'finish', reason: { kind: 'error', failure: failure.failure } }
         return
       }
@@ -682,8 +744,19 @@ export class EnterpriseLlmAdapter extends LlmAdapter {
             }
           }
         }
-        const nextStop = finishReason(choice.finish_reason)
+        const nextStop = finishReason(choice.finish_reason, payload, response.headers.get('x-request-id') ?? undefined, localizeContentSafety)
         if (nextStop) stopped = nextStop
+        if (stopped?.kind === 'error') {
+          // A confirmed filter is terminal even if DONE is absent or a malformed tail follows.
+          for (const block of blocks) {
+            if (block.type === 'text' || block.type === 'reasoning') {
+              yield { type: 'block-end', index: block.index, block: { type: block.type, text: block.text } }
+            }
+          }
+          tools.clear()
+          yield { type: 'finish', reason: stopped }
+          return
+        }
       }
     }
 
@@ -696,7 +769,7 @@ export class EnterpriseLlmAdapter extends LlmAdapter {
         yield { type: 'block-end', index: block.index, block: { type: 'text', text: block.text } }
       } else if (block.type === 'reasoning') {
         yield { type: 'block-end', index: block.index, block: { type: 'reasoning', text: block.text } }
-      } else {
+      } else if (stopped.kind !== 'error' && stopped.kind !== 'max-tokens') {
         if (!block.id || !block.name) throw new LlmError('BiSheng returned an incomplete tool call.', 'INVALID_RESPONSE')
         try {
           JSON.parse(block.arguments)
@@ -715,8 +788,9 @@ export class EnterpriseLlmAdapter extends LlmAdapter {
         }
       }
     }
+    tools.clear()
     if (usage) yield { type: 'usage', usage }
-    await this.options.onComplete?.(options.model)
+    if (stopped.kind !== 'error') await this.options.onComplete?.(options.model)
     yield { type: 'finish', reason: stopped }
   }
 }

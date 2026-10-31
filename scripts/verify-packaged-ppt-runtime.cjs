@@ -108,15 +108,28 @@ module.exports = async function verifyPackagedPptRuntime(context) {
     ? path.join(context.appOutDir, product + '.exe')
     : path.join(macContents, 'Frameworks', product + ' Helper.app', 'Contents', 'MacOS', product + ' Helper')
   if (!require('node:fs').existsSync(executable)) throw new Error('Cannot locate the packaged Electron executable')
+  // Stay outside the .app. Node 24 calls process.cwd() when the Helper starts
+  // a worker, and a working directory inside the bundle is already gone by
+  // then (uv_cwd ENOENT on the Intel packager). Harness verification uses
+  // appOutDir for the same reason.
   await execFileAsync(executable, [__filename, '--verify-runtime', appRoot], {
-    cwd: path.dirname(appRoot),
+    cwd: context.appOutDir,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     timeout: 120_000,
     maxBuffer: 1024 * 1024
   })
 }
 
+// Worker threads snapshot cwd at startup. Move off the bundle first, even if
+// the Helper later inherits a directory inside the .app.
+function useStableHelperCwd() {
+  process.chdir(os.tmpdir())
+}
+
+module.exports.useStableHelperCwd = useStableHelperCwd
+
 if (require.main === module && process.argv[2] === '--verify-runtime') {
+  useStableHelperCwd()
   verifyRuntime(path.resolve(process.argv[3])).catch(error => {
     console.error(error)
     process.exitCode = 1

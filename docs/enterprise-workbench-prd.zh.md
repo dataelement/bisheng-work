@@ -26,7 +26,7 @@
 3. 三方工作台市场打开时，公开市场保持原样；企业目录以独立来源展示，不并进公开 catalog 的安装、更新、收藏和投稿。
 4. 列表、详情和原包下载走与企业插件相同的凭据边界：DSH access token、同一 BiSheng 地址、Broker 转发、账号或租户切换后丢弃旧数据。
 5. 客户端能按详情中的长度和 SHA-256 核对原始包。核对通过表示取得管理员上传的原包。
-6. 企业工作台可以直接安装。安装使用核对后的本地 `.tgz`，调用 `installWorkbenchGeneration` 的 enterprise 来源，不经过 `allow_third_party_workbenches`。
+6. 企业工作台可以直接安装。安装使用核对后的本地 `.tgz`，调用 Plugin Manager 的 `installBundle` 并校验企业包名、版本，不经过 `allow_third_party_workbenches`。
 7. 本机已安装工作台、本机开发安装、公开市场安装拦截和已有用户数据保持现有行为。
 
 ### 2.1 交付优先级
@@ -68,9 +68,9 @@ P0 不依赖 P1。制品接口未部署或 P1 尚未交付时，企业目录和�
 
 `id` 与 `current_version.id` 只用于 API 定位，都是 32 位十六进制。版本字符串是完整 SemVer，可含预发布段。不用版本号代替版本 ID，不用 `legacy_id` 或 `workbench_key` 拼 API 路径。
 
-## 5. 与当前实现的差异
+## 5. 目录能力引入前后的差异（历史背景）
 
-当前关闭三方工作台市场时：
+引入本文目录能力前，关闭三方工作台市场时：
 
 - `enterpriseCapability.allowThirdPartyWorkbenches === false` 后，市场只保留「已安装」。
 - `refreshCatalog()` 清空 `remoteCatalog`，不请求 `/api/desktop-workbenches/catalog`。
@@ -169,7 +169,7 @@ Authorization: Bearer <DSH access token>
 - 「已安装」只展示本机清单和已加载 provider，不用企业 `id`、`workbench_key` 或 `package_name` 自动关联企业卡片。
 - 即使同一工作台同时出现在企业目录和本机清单，也显示为两个来源明确的条目；待安装协议确定后再定义关联规则。
 
-企业卡片展示 `display_name`、`description`、`package_name`、当前版本号和身份。仓库身份显示 `workbench_key` 文本。旧身份显示「旧格式」和 `legacy_id`。提供安装和「核对原包」，不提供收藏，也不把企业条目并进公开市场的更新。详情可查看 `package_metadata` 和第 6.2 节的版本字段。安装完成后需要重启 Harness。
+企业卡片展示 `display_name`、`description`、`package_name`、当前版本号和身份。仓库身份显示 `workbench_key` 文本。旧身份显示「旧格式」和 `legacy_id`。提供安装和「核对原包」，不提供收藏，也不把企业条目并进公开市场的更新。详情可查看 `package_metadata` 和第 6.2 节的版本字段。安装结果由 Plugin Manager 返回；只有 `restart-required` 时提示重启 Harness。
 
 设置页在工作台功能已开启且三方市场关闭时，说明改为：网络市场未开放；工作台市场展示本企业上传的工作台，可以直接安装；已安装里保留本机已安装和本地开发的工作台。三方市场打开时，保留现有公开市场说明，并补充可在「来自企业」安装本企业上传的工作台。
 

@@ -89,6 +89,27 @@ describe('LAN mobile bridge pairing surface', () => {
     expect(await response.text()).toContain('Connect a mobile device')
   })
 
+  it('reports live desktop locale and renders a changed preference without restarting the bridge', async () => {
+    let locale: 'en' | 'zh' = 'en'
+    const bridge = new LanMobileBridge({
+      harnessUrl: () => 'http://127.0.0.1:9999',
+      locale: () => locale
+    })
+    bridges.push(bridge)
+    const snapshot = await bridge.start()
+    const base = `http://127.0.0.1:${snapshot.port}`
+    expect((await fetch(`${base}/desktop/status`)).status).toBe(403)
+    const cookie = await authorizeDesktop(bridge)
+    const headers = { cookie }
+
+    expect(await (await fetch(`${base}/desktop/status`, { headers })).json()).toEqual({ connected: false, locale: 'en' })
+    expect(await (await fetch(`${base}/desktop`, { headers })).text()).toContain('Connect a mobile device')
+    locale = 'zh'
+    expect(await (await fetch(`${base}/desktop/status`, { headers })).json()).toEqual({ connected: false, locale: 'zh' })
+    expect(await (await fetch(`${base}/desktop`, { headers })).text()).toContain('<h1>连接移动设备</h1>')
+    expect(bridge.snapshot().pairingUrl).toBe(snapshot.pairingUrl)
+  })
+
   it('offers a reconnect page without exposing mobile APIs before approval', async () => {
     const bridge = new LanMobileBridge({
       harnessUrl: () => 'http://127.0.0.1:9999'
@@ -544,7 +565,7 @@ describe('LAN mobile bridge pairing surface', () => {
     const status = await fetch(`http://127.0.0.1:${snapshot.port}/desktop/status`, {
       headers: { cookie: desktopCookie }
     })
-    expect(await status.json()).toEqual({ connected: true })
+    expect(await status.json()).toEqual({ connected: true, locale: 'en' })
     const managementPage = await fetch(`http://127.0.0.1:${snapshot.port}/desktop`, {
       headers: { cookie: desktopCookie }
     })

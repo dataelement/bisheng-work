@@ -1,0 +1,34 @@
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/contract/slots.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/contract/slots.d.ts
+index 3253a36..db5b3be 100644
+--- a/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/contract/slots.d.ts
++++ b/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/contract/slots.d.ts
+@@ -10,6 +10,14 @@
+  */
+ declare module '@deepseek-ai/dsh-client-ui-slots' {
+     interface SlotMap {
++        /** Layout for plugin pages; feature-owned render callbacks keep their own state and services. */
++        'settings.plugins.layout': { kind: 'single'; scope: 'root'; owner: { items: readonly (SettingsLayoutItem & { label: string })[] } };
++        /** Navigation layout; renderEntry preserves the shell's native button and selection behavior. */
++        'settings.navigation': { kind: 'single'; scope: 'root'; owner: SettingsNavigationOwnerProps };
++        /** Reposition General rows without taking over their state or mounting them twice. */
++        'settings.general.layout': { kind: 'single'; scope: 'root'; owner: SettingsItemsLayoutOwnerProps };
++        /** Layout for feature-owned header actions; unknown contributions stay available. */
++        'settings.actions.layout': { kind: 'single'; scope: 'root'; owner: SettingsItemsLayoutOwnerProps };
+         /** Optional sidebar account launcher; opens the shell-owned settings panel. */
+         'settings.launcher': {
+             kind: 'single';
+@@ -182,4 +190,13 @@ export interface SettingsLauncherOwnerProps {
+     /** @param id - registered onboarding editor to open explicitly. */
+     openOnboarding: (id: string) => void;
+ }
++export interface SettingsLayoutItem { id: string; render: () => import('react').ReactNode }
++export interface SettingsItemsLayoutOwnerProps { items: readonly SettingsLayoutItem[] }
++export interface SettingsNavigationRow { id: string; label: string; order?: number }
++export interface SettingsNavigationOwnerProps {
++    rows: readonly SettingsNavigationRow[];
++    activeId: string | undefined;
++    /** The shell's native row; `overrides.icon` replaces the glyph the shell picks by id, nothing else. */
++    renderEntry: (row: SettingsNavigationRow, overrides?: { icon?: import('react').ComponentType<{ className?: string; size?: number }> }) => import('react').ReactNode;
++}
+ //# sourceMappingURL=slots.d.ts.map
+\ No newline at end of file

@@ -1,106 +1,101 @@
-import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { EntryTree } from '@deepseek-ai/cordis-plugin-loader'
-import { bundlePatchPaths, composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+import { bundlePatchPaths, loadOverlayPatches, resolvePluginResource } from '@deepseek-ai/dsh-app-boot'
 import { randomUUID } from 'node:crypto'
-import { bindEnterpriseAuth } from './enterprise-auth.js'
-import { packageEntry } from './community-package.js'
-
-/** A transient Loader subtree keeps client modules and host lifecycle in the same registry. */
-class MarketTree extends EntryTree {
-  constructor(ctx) {
-    super(ctx)
-    this.children = new Set()
-  }
-  *entries() {
-    yield* super.entries()
-    for (const tree of this.children) yield* tree.entries()
-  }
-  write() {}
-}
+import { bindEnterpriseAuth, inheritEnterpriseAuth } from './enterprise-auth.js'
 
 function contained(root, path) {
   const nested = relative(root, path)
   if (isAbsolute(nested) || nested.startsWith('..')) throw new Error('Plugin entry leaves its package.')
 }
 
+/** Authorization adapter only: Harness owns ESM resolution and root composition. */
 export function createMarketRuntime(ctx, auth, onRequestSettled) {
-  let registry
   return async record => {
-    registry ??= new MarketTree(ctx)
-    const tree = new MarketTree(ctx)
-    // EntryTree attaches one subtree to its owner. Keep all instances discoverable.
-    if (ctx.fiber.entry) ctx.fiber.entry.subtree = registry
+    const layers = ctx.get('profileRuntimeLayers')
+    if (!layers) throw new Error('Enterprise plugins require the Harness root composition service.')
     const root = join(record.directory, 'node_modules', record.name)
+    const parent = pathToFileURL(join(root, 'package.json')).href
     const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
-    const entry = resolve(root, packageEntry(pkg))
-    contained(root, entry)
     const id = randomUUID()
-    let name = pathToFileURL(entry).href
-    let config = record.config ?? {}
-    if (pkg.dsh?.bundle) {
-      const patches = bundlePatchPaths(root, pkg.dsh.bundle).flatMap(path => {
+    const patches = pkg.dsh?.bundle
+      ? bundlePatchPaths(root, pkg.dsh.bundle).flatMap(path => {
         contained(root, path)
         return loadOverlayPatches('enterprise-market', path)
       })
-      const packageRequire = createRequire(join(root, 'package.json'))
-      const entries = composeEntries([patches])
-      const anchor = rows => rows.forEach(row => {
-        row.id = `${id}-${row.id || randomUUID()}`
-        if (row.name && !row.name.startsWith('cordis:') && !row.name.startsWith('file:')) row.name = pathToFileURL(packageRequire.resolve(row.name)).href
-        if (row.group && Array.isArray(row.config)) anchor(row.config)
-      })
-      anchor(entries)
-      name = pathToFileURL(createRequire(import.meta.url).resolve('@deepseek-ai/cordis-plugin-group')).href
-      config = entries
+      : [{ insert: [{ id: `enterprise-${record.plugin_id ?? record.name}`, name: record.name, config: record.config ?? {} }] }]
+    const owned = new Map()
+    const originalNames = new Map()
+    const existing = new Set([...ctx.loader.entries()].map(entry => entry.options.id))
+    const anchor = (rows, inserted = false) => {
+      for (const row of rows) {
+        const originalName = row.name
+        if (inserted && row.name && !row.name.startsWith('cordis:')) {
+          // The same Node import resolver used by Harness metadata/client discovery.
+          row.name = pathToFileURL(resolvePluginResource(row.name, parent)).href
+        }
+        if (inserted) {
+          ctx.loader.ensureId(row)
+          if (existing.has(row.id) || owned.has(row.id)) throw new Error(`Enterprise bundle requires a unique entry id: ${row.id}`)
+          owned.set(row.id, row.name)
+          originalNames.set(row.id, originalName)
+        }
+        // A patch name is a matching assertion, not a replacement. Keep
+        // assertions on this layer's inserted entries aligned with their URL.
+        if (!inserted && row.name && originalNames.get(row.id) === row.name) row.name = owned.get(row.id)
+        if (row.insert) anchor(row.insert, true)
+        if (row.group && Array.isArray(row.config)) anchor(row.config, inserted)
+      }
     }
-    let timer, transport, unbind, removed
+    anchor(patches)
+    let transport, unbind, detach, removed
     const remove = () => removed ??= (async () => {
       unbind?.()
+      detach?.()
       const errors = []
       try { if (transport) await auth.revoke(transport) } catch (error) { errors.push(error) }
       try {
-        // EntryGroup.remove() starts disposal but does not await async effects.
-        await tree.store[id]?.fiber?.dispose()
-      } catch (error) { errors.push(error) } finally {
-        tree.root.remove(id)
-        registry.children.delete(tree)
-      }
+        // Stop our own fibers even when the owner is being removed by a root
+        // transaction; waiting on another root transaction would deadlock it.
+        for (const entry of [...ctx.loader.entries()]) {
+          if (owned.has(entry.options.id) && owned.get(entry.options.id) === entry.options.name) {
+            try { await entry.fiber?.dispose() } catch (error) { errors.push(error) }
+          }
+        }
+      } catch (error) { errors.push(error) }
+      try { await layers.remove(id, ctx.fiber.uid === null) } catch (error) { errors.push(error) }
       if (errors.length) throw new AggregateError(errors, 'Enterprise plugin cleanup failed.')
     })()
     try {
       if (auth) {
-        if (typeof record.plugin_id !== 'string' || record.plugin_id.length === 0) {
-          throw new Error('Enterprise plugin identity is required.')
-        }
+        if (typeof record.plugin_id !== 'string' || !record.plugin_id) throw new Error('Enterprise plugin identity is required.')
         transport = await auth.grant({ pluginId: record.plugin_id, instanceId: id })
-        unbind = await bindEnterpriseAuth(tree.ctx, transport, error => onRequestSettled?.(record, error))
+        const scope = ctx.extend({})
+        unbind = await bindEnterpriseAuth(scope, transport, error => onRequestSettled?.(record, error))
+        // Cordis emits this synchronously before apply. Bind the new fiber itself,
+        // leaving reused entries and unrelated root plugins without credentials.
+        detach = ctx.on('internal/plugin', fiber => {
+          const entry = fiber.ctx.fiber.entry
+          if (fiber.uid != null && entry && owned.has(entry.options.id) && owned.get(entry.options.id) === entry.options.name) {
+            inheritEnterpriseAuth(fiber.ctx, scope)
+          }
+        }, { global: true })
       }
-      const options = { id, name, config }
-      registry.children.add(tree)
-      await tree.root.create(options)
-      tree.root.data.push(options)
-      const fiber = tree.store[id].fiber
-      if (!fiber) throw new Error('Plugin did not create a runtime instance.')
-      await Promise.race([fiber.await(), new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Plugin dependencies or configuration are not ready.')), 15000)
-      })])
-      if (fiber.state !== 2) throw new Error('Plugin dependencies or configuration are not ready.')
-      await tree.await({ timeout: 15000 })
-      await new Promise(resolve => setImmediate(resolve))
-      const failed = Object.values(tree.store).find(entry => String(entry.options?.id ?? '').startsWith(`${id}-`) && entry.fiber?.state !== 2)
-      if (fiber.state !== 2 || failed) throw new Error(failed?.lastImportError?.message || 'Plugin bundle entry did not activate.')
-      return {
-        dispose: remove,
-        get state() { return tree.store[id]?.fiber?.state }
+      const required = [...owned.keys()].filter(key => {
+        const find = rows => rows.some(row => !row.disabled && (row.id === key || find(row.insert ?? []) || (row.group && Array.isArray(row.config) && find(row.config))))
+        return find(patches)
+      })
+      const active = () => {
+        const entries = [...ctx.loader.entries()]
+        return required.every(key => entries.some(entry => entry.options.id === key && (entry.options.disabled || entry.fiber?.state === 2)))
       }
+      await layers.set(id, patches, required)
+      if (!active()) throw new Error('Enterprise bundle entries did not activate in the root composition.')
+      return { dispose: remove, get state() { return active() ? 2 : 0 } }
     } catch (error) {
-      const errors = [error]
-      try { await remove() } catch (cleanupError) { errors.push(cleanupError) }
-      if (errors.length > 1) throw new AggregateError(errors, error.message, { cause: error })
+      try { await remove() } catch (cleanup) { throw new AggregateError([error, cleanup], error.message, { cause: error }) }
       throw error
-    } finally { clearTimeout(timer) }
+    }
   }
 }

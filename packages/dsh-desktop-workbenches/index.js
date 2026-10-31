@@ -1,3 +1,4 @@
+import { installEnterpriseWorkbench } from './enterprise-install.mjs'
 import { readInstallEvidence } from './install-evidence.mjs'
 import Schema from '@deepseek-ai/schemastery'
 import { CatalogError, createCatalogReader } from './catalog.mjs'
@@ -335,44 +336,18 @@ export function apply(ctx, config) {
       }
     })
   })
-  ctx.inject(['desktopPnpm', 'enterpriseWorkbenchPackages'], (scoped) => {
+  ctx.inject(['pluginManager', 'enterpriseWorkbenchPackages'], (scoped) => {
     scoped.connection.fetch.register({
       path: '/api/desktop-workbenches/enterprise-install',
       methods: ['POST'],
       requestBody: 'buffered',
       async fetch(request) {
-        let opened
         try {
           const payload = await readPayload(request, 4096, 'Request is too large.')
-          if (typeof payload?.id !== 'string' || !/^[a-f0-9]{32}$/u.test(payload.id)) {
-            throw new MarketInstallError('An enterprise workbench is required.')
-          }
-          opened = await scoped.enterpriseWorkbenchPackages.open(payload.id)
-          if (!opened || typeof opened.path !== 'string' || !isAbsolute(opened.path) || typeof opened.packageName !== 'string' || typeof opened.version !== 'string') {
-            throw new MarketInstallError('The enterprise workbench package could not be prepared.')
-          }
-          const handle = scoped.desktopPnpm.installWorkbenchGeneration({
-            source: 'enterprise',
-            path: opened.path,
-            pluginSpec: opened.path,
-            expectedPluginName: opened.packageName,
-            expectedVersion: opened.version
-          }, config.root)
-          await awaitHandle(handle)
-          return Response.json({
-            install: {
-              id: payload.id,
-              pluginName: opened.packageName,
-              version: opened.version,
-              source: 'enterprise',
-              installedAt: new Date().toISOString()
-            },
-            restartRequired: true
-          }, { headers: { 'cache-control': 'no-store' } })
+          const result = await installEnterpriseWorkbench(scoped.pluginManager, scoped.enterpriseWorkbenchPackages, payload?.id)
+          return Response.json(result.body, { status: result.status, headers: { 'cache-control': 'no-store' } })
         } catch (error) {
           return installFailure(error, 'Could not install the enterprise workbench.')
-        } finally {
-          await opened?.release?.()
         }
       }
     })

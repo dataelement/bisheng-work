@@ -198,3 +198,16 @@ index c38bfbb..d6eb8aa 100644
  				const name = group.id === "deepseek-account" ? t("provider.account") : group.name;
  				for (const model of group.models) rows.push({
  					id: rowId(group.id, model.id),
+diff --git a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/types/client/directory.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/types/client/directory.d.ts
+index 1483e59..26a3823 100644
+--- a/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/types/client/directory.d.ts
++++ b/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/types/client/directory.d.ts
+@@ -43,6 +43,8 @@ export declare class ModelDirectory {
+     /** Latest selection operation wins; an older response never overwrites a newer one. */
+     private generation;
+     private disposed;
++    private recovery;
++    private recoveryAttempt;
+     private readonly unsubscribeCatalog;
+     private readonly unsubscribeSelection;
+     /**

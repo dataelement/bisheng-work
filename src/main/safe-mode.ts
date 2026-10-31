@@ -58,6 +58,9 @@ export interface SafeModeBackupViewModel {
   deleteConfirm: string
 }
 
+/** Localize user-facing recovery guidance when rendering; retain original diagnostics. */
+export type SafeModeNotice = string | { zh: string; en: string; detail: string }
+
 export interface SafeModeViewModel {
   locale: SafeModeLocale
   brand: string
@@ -153,9 +156,15 @@ export function buildSafeModeViewModel(options: {
   recoveryLocked?: boolean
   backupRestoreLocked?: boolean
   allowedRestoreId?: string
-  notice?: string
+  notice?: SafeModeNotice
   noticeTone?: 'success' | 'error'
 }): SafeModeViewModel {
+  const notice = typeof options.notice === 'object'
+    ? `${options.notice[options.locale]}\n${options.notice.detail}`
+    : options.notice
+  const noticeSummary = typeof options.notice === 'object'
+    ? options.notice[options.locale]
+    : summarizeLongNotice(notice, options.locale)
   const issues = (options.issues ?? []).map((issue): SafeModeIssueViewModel => {
     const zh = options.locale === 'zh'
     const kindLabel = issue.kind === 'unverified-module-reference'
@@ -388,8 +397,8 @@ export function buildSafeModeViewModel(options: {
       restartBusyLabel: '正在重启…',
       restartConfirm: safeModeExitConfirmation(blockingGroups, 'zh'),
       quitLabel: '退出 BISHENG',
-      notice: options.notice,
-      noticeSummary: summarizeLongNotice(options.notice, 'zh'),
+      notice,
+      noticeSummary,
       noticeTone: options.noticeTone,
       upgradeAllLabel: undefined,
       upgradeAllBusyLabel: '正在批量升级…',
@@ -428,8 +437,8 @@ export function buildSafeModeViewModel(options: {
     restartBusyLabel: 'Restarting…',
     restartConfirm: safeModeExitConfirmation(blockingGroups, 'en'),
     quitLabel: 'Quit BISHENG',
-    notice: options.notice,
-    noticeSummary: summarizeLongNotice(options.notice, 'en'),
+    notice,
+    noticeSummary,
     noticeTone: options.noticeTone,
     upgradeAllLabel: undefined,
     upgradeAllBusyLabel: 'Upgrading plugins…',

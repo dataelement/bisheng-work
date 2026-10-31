@@ -9,3 +9,14 @@ export function resolveAccountError(
   code: unknown,
   message: unknown
 ): { code: string, message?: undefined } | { code?: undefined, message: string }
+
+
+export type ContentSafetyCode = 'CONTENT_FILTERED' | 'CONTENT_CHECK_UNAVAILABLE'
+export const CONTENT_SAFETY_ERROR_COPY: Readonly<Record<
+  ContentSafetyCode,
+  Readonly<{ zh: string, en: string, ja: string }>
+>>
+export function resolveContentSafetyError(
+  code: unknown,
+  message: unknown
+): { code: ContentSafetyCode, message?: string } | null

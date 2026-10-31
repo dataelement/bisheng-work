@@ -1,8 +1,8 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
+index 5cca45b..f714d5f 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js
-@@ -1095,8 +1095,9 @@
- 			const current = mainSessionId(list);
+@@ -1096,6 +1096,7 @@ window.__ModuleLoader__.load({
  			const currentGroup = current === void 0 ? void 0 : owningGroupKey(workspaces, current);
  			const groups = [];
  			for (const g of groupByWorkspace(list, workspaces, archived, rowState.archivedFilter, view.ungroupedOrder)) {
@@ -10,9 +10,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  				const expanded = expandedGroups.has(g.key);
  				groups.push({
  					key: g.key,
- 					workspaceId: g.workspaceId,
-@@ -1268,12 +1269,20 @@
- 					groupBy: "workspace",
+@@ -1269,10 +1270,18 @@ window.__ModuleLoader__.load({
  					orderBy: "updated",
  					groupExpansion: {},
  					sessionOrderByAccount: {},
@@ -31,9 +29,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  					setGroupBy: (d, mode) => {
  						d.groupBy = mode;
  					},
- 					setOrderBy: (d, mode, initialOrders) => {
-@@ -1367,8 +1376,18 @@
- 			connecting = /* @__PURE__ */ new Map();
+@@ -1368,6 +1377,16 @@ window.__ModuleLoader__.load({
  			lifetime = new AbortController();
  			selection = (0, _deepseek_ai_dsh_client_store.createSnapshotStore)({}, { persist: { name: "dsh.sessions.current" } });
  			mainReference;
@@ -50,9 +46,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			/**
  			* @param ctx - Client root Context.
  			* @param directoryPicker - the directory-picking Remote namespace.
- 			* @param workspaces - pure Workspace Controller.
-@@ -1419,9 +1438,9 @@
- 				const archived = this.workspaces.list.getSnapshot().archivedSessionIds;
+@@ -1420,7 +1439,7 @@ window.__ModuleLoader__.load({
  				const sessions = this.sessions.list.getSnapshot();
  				const blank = sessions.ids.find((id) => {
  					const summary = sessions.byId[id];
@@ -61,13 +55,16 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  				});
  				return this.createNamed({
  					workspaceId: workspace.workspaceId,
- 					...blank === void 0 ? {} : { sessionId: blank },
-@@ -1466,16 +1485,92 @@
- 					if (code !== "agent-preset/not-found" && code !== "agent-preset/invalid") throw error;
+@@ -1467,14 +1486,97 @@ window.__ModuleLoader__.load({
  					return this.createNamed(request);
  				}
  			}
 -			openSession(target) {
++			navigationHandlers = new Set();
++			registerNavigationHandler(handler) {
++				this.navigationHandlers.add(handler);
++				return () => this.navigationHandlers.delete(handler);
++			}
 +			registerSessionOpener(handler) {
 +				if (this.sessionOpener !== null) throw new Error("uiWorkspace session opener already registered");
 +				this.sessionOpener = handler;
@@ -142,6 +139,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
 +				await this.workspaces.delete(workspaceId);
 +			}
 +			openSession(target, source = "explicit-session") {
++				this.navigationHandlers.forEach((handler) => handler("open"));
 +				if (typeof target === "string") this.view.markSessionRead(target);
 +				if (typeof target === "string" && this.sessionOpener?.(target, source) === true) return;
  				this.replaceMain(target, this.lifetime.signal, "reveal");
@@ -150,14 +148,13 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  				return this.openWorkspaceSession(workspaceId, beforeOpen, options);
  			}
  			async openWorkspaceSession(workspaceId, beforeOpen, reuse) {
++				this.navigationHandlers.forEach((handler) => handler("open"));
  				const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal]);
 +				const knownSessions = new Set(this.sessions.list.getSnapshot().ids);
  				let sessionId;
  				try {
  					sessionId = await this.connectBlank(workspaceId, reuse);
- 				} catch (error) {
-@@ -1485,8 +1580,10 @@
- 					});
+@@ -1486,6 +1588,8 @@ window.__ModuleLoader__.load({
  					throw error;
  				}
  				if (navigation.aborted) return;
@@ -166,9 +163,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  				this.replaceMain(sessionId, navigation, "reveal", beforeOpen);
  			}
  			async forkSession(sessionId, onCreated, options) {
- 				return this.sessions.fork({
-@@ -1495,12 +1592,23 @@
- 					...onCreated === void 0 ? {} : { onCreated },
+@@ -1496,10 +1600,25 @@ window.__ModuleLoader__.load({
  					...options?.allowMigration === void 0 ? {} : { allowMigration: options.allowMigration }
  				});
  			}
@@ -183,6 +178,10 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
 +				};
 +			}
  			startSession(workspaceId, options) {
++				if (options === void 0) {
++					if ([...this.navigationHandlers].some((handler) => handler("new", workspaceId) === true)) return;
++					this.navigationHandlers.forEach((handler) => handler("open"));
++				}
  				const { agentPreset, ...draft } = options ?? {};
  				const draftOptions = options === void 0 ? void 0 : draft;
  				const initializeDraft = draftOptions !== void 0 && (draftOptions.prompt !== void 0 || draftOptions.clearPreviousDraft === true);
@@ -190,9 +189,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  				const workspace = this.workspaces.list.getSnapshot();
  				const sessions = this.sessions.list.getSnapshot();
  				const current = this.mainReference?.sessionId;
- 				const currentWorkspaceId = current === void 0 ? void 0 : workspace.items.find((item) => item.sessionIds.includes(current))?.workspaceId;
-@@ -1544,8 +1652,26 @@
- 			}
+@@ -1545,6 +1664,24 @@ window.__ModuleLoader__.load({
  			async unarchiveSession(sessionId) {
  				await this.workspaces.unarchiveSession(sessionId);
  			}
@@ -217,9 +214,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			async pinSession(sessionId) {
  				await this.workspaces.pinSession(sessionId);
  				const { items, pinnedSessionIds, archivedSessionIds } = this.workspaces.list.getSnapshot();
- 				this.view.pinSessionOrder(sessionId, pinOrderAccounts(items, sessionId), pinOrderSource(items, this.sessions.list.getSnapshot(), {
-@@ -2174,9 +2300,9 @@
- 		* @param props.onUnarchive - unarchive an archived result row.
+@@ -2175,7 +2312,7 @@ window.__ModuleLoader__.load({
  		* @param props.t - Workspace-browser translation seat.
  		* @returns the result row.
  		*/
@@ -228,9 +223,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			const selected = result.id === currentId;
  			const statuses = sessionStatuses(result, t);
  			const primaryStatus = statuses[0];
- 			return (0, react_jsx_runtime.jsxs)("div", {
-@@ -2189,8 +2315,9 @@
- 				},
+@@ -2190,6 +2327,7 @@ window.__ModuleLoader__.load({
  				children: [(0, react_jsx_runtime.jsxs)("span", {
  					className: Rows_module_css_default.searchResultHeading,
  					children: [
@@ -238,9 +231,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  						(0, react_jsx_runtime.jsx)("span", {
  							className: Rows_module_css_default.slot,
  							children: !result.archived && primaryStatus.state !== "idle" && (0, react_jsx_runtime.jsx)(SessionStatusDots, { statuses })
- 						}),
-@@ -2250,9 +2377,9 @@
- 		* @param props.drag - optional row-drag target wiring; blank rows cannot start a drag.
+@@ -2251,7 +2389,7 @@ window.__ModuleLoader__.load({
  		* @param props.t - the browser root's locale seat.
  		* @returns the session row.
  		*/
@@ -249,9 +240,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			const row = node;
  			const title = displayTitle(node, t);
  			const selected = node.id === currentId;
- 			const statuses = sessionStatuses(node, t);
-@@ -2279,8 +2406,13 @@
- 					"aria-description": row.archived ? t("toast.archivedNotOpenable") : void 0,
+@@ -2280,6 +2418,11 @@ window.__ModuleLoader__.load({
  					onClick: () => {
  						onOpen(node.id);
  					},
@@ -263,9 +252,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  					onPointerEnter: marquee.enter,
  					onPointerLeave: marquee.leave,
  					draggable,
- 					onDragStart: !draggable ? void 0 : (e) => {
-@@ -2302,13 +2434,14 @@
- 					},
+@@ -2303,11 +2446,12 @@ window.__ModuleLoader__.load({
  					children: [
  						(0, react_jsx_runtime.jsx)("span", {
  							className: Rows_module_css_default.slot,
@@ -279,9 +266,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  							onDoubleClick: row.blank ? void 0 : (e) => {
  								e.stopPropagation();
  								onRenameRequest(node.id, row.title);
- 							},
-@@ -2342,9 +2475,11 @@
- 									children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEllipsisOutlineRegular, {})
+@@ -2343,7 +2487,9 @@ window.__ModuleLoader__.load({
  								}),
  								children: renderSlot("sidebar.workspaces.session.menu.item", {
  									sessionId: node.id,
@@ -292,9 +277,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  								}, { hookContext: menuOpenState })
  							}), renderSlot("sidebar.workspaces.session.row.action", {
  								sessionId: node.id,
- 								displayTitle: row.title
-@@ -3019,10 +3154,10 @@
- 					})
+@@ -3020,8 +3166,8 @@ window.__ModuleLoader__.load({
  				]
  			});
  		}
@@ -305,8 +288,30 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			const panelActive = usePanelInfo((info) => info.activePanelId !== null);
  			const statuses = useSessionStatus((s) => s);
  			const current = panelActive ? void 0 : Object.values(list.byId).find((session) => (session.retainedBy.mainView ?? 0) > 0)?.id;
- 			const revealGroup = revealSessionId === void 0 || !workspaceReady ? void 0 : owningGroupKey(workspaces, revealSessionId);
-@@ -3298,8 +3433,10 @@
+@@ -3149,7 +3295,7 @@ window.__ModuleLoader__.load({
+ 			const rootGroups = childrenByParent.get(void 0) ?? [];
+ 			const workspaceDropAtListStart = rootGroups[0]?.workspaceId !== void 0 && workspaceDrag?.over?.id === rootGroups[0].workspaceId && workspaceDrag.over.half === "before";
+ 			const rowKeys = groups.length === 0 ? ["empty"] : [];
+-			const renderGroup = (group, depth) => {
++			const renderGroup = (group, depth, active = true) => {
+ 				const workspaceId = group.workspaceId;
+ 				const children = childrenByParent.get(group.key) ?? [];
+ 				const compatibleDrag = workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key);
+@@ -3158,7 +3304,7 @@ window.__ModuleLoader__.load({
+ 				const visible = watermarkRows(group.sessions, watermark);
+ 				const sessionsExpanded = visible.hiddenCount === 0;
+ 				rowKeys.push(`workspace:${group.key}`);
+-				const childRows = group.expanded ? children.map((child) => renderGroup(child, depth + 1)) : [];
++				const childRows = group.expanded ? children.map((child) => renderGroup(child, depth + 1, active)) : [];
+ 				const sessions = visible.rows;
+ 				for (const node of sessions) rowKeys.push(`session:${node.id}`);
+ 				if (collapsed.hiddenCount > 0) rowKeys.push(`overflow:${group.key}`);
+@@ -3294,11 +3440,13 @@ window.__ModuleLoader__.load({
+ 							};
+ 							return (0, react_jsx_runtime.jsx)(SessionNodeItem, {
+ 								node,
+-								currentId: current,
++								currentId: active ? current : void 0,
  								now,
  								onOpen: open,
  								onRenameRequest: onSessionRenameRequest,
@@ -316,8 +321,41 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  								onReveal: node.id === revealSessionId && group.key === revealGroup ? () => {
  									onSessionRevealed(node.id);
  								} : void 0,
- 								drag: dragProps,
-@@ -3351,9 +3488,9 @@
+@@ -3328,6 +3476,16 @@ window.__ModuleLoader__.load({
+ 				}, group.key);
+ 			};
+ 			const groupRows = rootGroups.map((group) => renderGroup(group, 0));
++			const recentItems = deriveFlat(list, ungroupedSessionIds, rowState, statuses).map((node) => ({
++				id: node.id, updatedAt: node.updatedAt, pinned: node.pinned, blank: node.blank,
++				render: (active) => (0, react_jsx_runtime.jsx)(SessionNodeItem, {
++					node, currentId: active ? current : void 0, now, onOpen: open,
++					onRenameRequest: onSessionRenameRequest, renderSlot,
++					unread: unreadSessionIds.includes(node.id), onUnreadChange,
++					onReveal: node.id === revealSessionId ? () => onSessionRevealed(node.id) : void 0, t
++				}, node.id)
++			}));
++
+ 			return (0, react_jsx_runtime.jsxs)(_deepseek_ai_dsh_client_ui_primitives.HoverCardGroup, {
+ 				className: clsx(WorkspaceBrowser_module_css_default.treeBody, WorkspaceBrowser_module_css_default.wide),
+ 				children: [
+@@ -3341,18 +3499,20 @@ window.__ModuleLoader__.load({
+ 						rowKeys,
+ 						ready: list.phase === "ready" && workspaceReady && !nativeDragActive,
+ 						resetKey: JSON.stringify([animationResetKey, watermarkMotionKey]),
+-						children: [groups.length === 0 && (0, react_jsx_runtime.jsx)(EmptySessions, {
+-							rowState,
+-							onLeaveArchivedOnly,
+-							t
+-						}), groupRows]
++						children: renderSlot("sidebar.workspaces.collection", {
++							mode: "projects", query: "", archivedOnly: rowState.archivedFilter === "only",
++							projects: (active) => rootGroups.filter((group) => group.workspaceId !== void 0).map((group) => renderGroup(group, 0, active)),
++							items: recentItems
++						}, { fallback: [groups.length === 0 && (0, react_jsx_runtime.jsx)(EmptySessions, {
++							rowState, onLeaveArchivedOnly, t
++						}), groupRows] })
+ 					}),
+ 					(0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })
  				]
  			});
  		}
@@ -327,10 +365,23 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			const panelActive = usePanelInfo((info) => info.activePanelId !== null);
  			const statuses = useSessionStatus((s) => s);
  			const rows = (0, react.useMemo)(() => deriveFlat(list, sessionIds, rowState, statuses), [
- 				list,
-@@ -3392,10 +3529,12 @@
+@@ -3381,20 +3541,19 @@ window.__ModuleLoader__.load({
+ 					rowKeys: rows.length === 0 ? ["empty"] : rows.map((row) => `session:${row.id}`),
+ 					ready: list.phase === "ready" && workspaceReady && drag === null,
+ 					resetKey: animationResetKey,
+-					children: [rows.length === 0 && (0, react_jsx_runtime.jsx)(EmptySessions, {
+-						rowState,
+-						onLeaveArchivedOnly,
+-						t
+-					}), rows.map((node) => {
++					children: (() => {
++						const items = rows.map((node) => ({ id: node.id, updatedAt: node.updatedAt, pinned: node.pinned, blank: node.blank, render: (selected) => {
+ 						const active = drag !== null && drag.pinned === node.pinned;
+ 						const normalizeHalf = (half) => node.blank ? "after" : half;
+ 						return (0, react_jsx_runtime.jsx)(SessionNodeItem, {
  							node,
- 							currentId,
+-							currentId,
++							currentId: selected ? currentId : void 0,
  							now,
  							onOpen: open,
 -							onRenameRequest: onSessionRenameRequest,
@@ -342,8 +393,16 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  							onReveal: node.id === revealSessionId ? () => {
  								onSessionRevealed(node.id);
  							} : void 0,
- 							drag: {
-@@ -3437,11 +3576,10 @@
+@@ -3433,14 +3592,17 @@ window.__ModuleLoader__.load({
+ 							},
+ 							t
+ 						}, node.id);
+-					})]
++					} }));
++						return renderSlot("sidebar.workspaces.collection", {
++							mode: "flat", query: "", archivedOnly: rowState.archivedFilter === "only", projects: () => [], items
++						}, { fallback: [rows.length === 0 && (0, react_jsx_runtime.jsx)(EmptySessions, { rowState, onLeaveArchivedOnly, t }), items.map((item) => item.render(true))] });
++					})()
  				}), (0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })]
  			});
  		}
@@ -355,19 +414,32 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			const statuses = useSessionStatus((s) => s);
  			const currentRemote = remote.query === query ? remote : {
  				query,
- 				status: "loading",
-@@ -3473,8 +3611,9 @@
+@@ -3469,13 +3631,22 @@ window.__ModuleLoader__.load({
+ 							className: WorkspaceBrowser_module_css_default.searchTree,
+ 							role: "tree",
+ 							"aria-label": t("search.results.aria"),
+-							children: results.items.map((result) => (0, react_jsx_runtime.jsx)(SearchResultItem, {
++							children: renderSlot("sidebar.workspaces.collection", {
++								mode: "search", query, archivedOnly: archivedFilter === "only", projects: () => [],
++								items: results.items.map((result) => ({
++									id: result.id, updatedAt: list.byId[result.id]?.updatedAt ?? 0,
++									render: (active) => (0, react_jsx_runtime.jsx)(SearchResultItem, {
++										result, currentId: active ? currentId : void 0, onOpen: open, onUnarchive, renderSlot, t
++									}, result.id)
++								}))
++							}, { fallback: results.items.map((result) => (0, react_jsx_runtime.jsx)(SearchResultItem, {
  								result,
  								currentId,
  								onOpen: open,
  								onUnarchive,
 +								renderSlot,
  								t
- 							}, result.id))
+-							}, result.id))
++							}, result.id)) })
  						}),
  						pending && (0, react_jsx_runtime.jsx)("div", {
-@@ -3505,21 +3644,29 @@
- 		* Render the browsing region.
+ 							role: "status",
+@@ -3506,19 +3677,27 @@ window.__ModuleLoader__.load({
  		* @param props - composed slot props (shell owner share + store + injected actions).
  		* @returns the region element tree.
  		*/
@@ -399,9 +471,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			const workspacePhase = useWorkspaces((state) => state.phase);
  			const workspaceStreamState = useWorkspaces((state) => state.state);
  			const archivedSessionIds = useWorkspaces((state) => state.archivedSessionIds);
- 			const pinnedSessionIds = useWorkspaces((state) => state.pinnedSessionIds);
-@@ -3528,8 +3675,13 @@
- 			const orderBy = useStore((s) => s.orderBy);
+@@ -3529,6 +3708,11 @@ window.__ModuleLoader__.load({
  			const archivedFilter = useStore((s) => s.archivedFilter ?? "default");
  			const groupExpansion = useStore((s) => s.groupExpansion);
  			const sessionOrderByAccount = useStore((s) => s.sessionOrderByAccount);
@@ -413,23 +483,19 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			const guardedOpen = (sessionId) => {
  				if (archivedSessionIds.includes(sessionId)) {
  					notifyArchivedNotOpenable();
- 					return;
-@@ -3798,8 +3950,13 @@
+@@ -3798,6 +3982,11 @@ window.__ModuleLoader__.load({
  			const [deleting, setDeleting] = (0, react.useState)(false);
  			const [deleteCommittedId, setDeleteCommittedId] = (0, react.useState)(null);
  			const [deleteError, setDeleteError] = (0, react.useState)(null);
- 			(0, react.useEffect)(() => {
++			(0, react.useEffect)(() => {
 +				if (deleting || deleteTarget === null || deleteTarget.visibilityRevision === workspaceVisibilityRevision) return;
 +				setDeleteTarget(null);
 +				setDeleteError(null);
 +			}, [deleting, deleteTarget, workspaceVisibilityRevision]);
-+			(0, react.useEffect)(() => {
+ 			(0, react.useEffect)(() => {
  				if (deleteCommittedId === null || workspaces.some((workspace) => workspace.workspaceId === deleteCommittedId)) return;
  				setDeleting(false);
- 				setDeleteCommittedId(null);
- 				setDeleteTarget(null);
-@@ -3811,8 +3968,12 @@
- 			};
+@@ -3812,6 +4001,10 @@ window.__ModuleLoader__.load({
  			const confirmDelete = () => {
  				/* v8 ignore next -- the Modal is absent without a target and its button is disabled while deleting. */
  				if (deleting || deleteTarget === null) return;
@@ -440,9 +506,16 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  				setDeleting(true);
  				setDeleteCommittedId(null);
  				setDeleteError(null);
- 				deleteWorkspace(deleteTarget.workspaceId).then(() => {
-@@ -3963,9 +4124,9 @@
- 					(0, react_jsx_runtime.jsx)("div", {
+@@ -3830,7 +4023,7 @@ window.__ModuleLoader__.load({
+ 						children: [
+ 							wide && (0, react_jsx_runtime.jsx)("span", {
+ 								className: clsx(WorkspaceBrowser_module_css_default.sectionLabel, WorkspaceBrowser_module_css_default.wide, searchExpanded && WorkspaceBrowser_module_css_default.sectionLabelHidden),
+-								children: groupBy === "flat" ? t("section.sessions") : t("section.workspaces")
++								children: renderSlot("sidebar.workspaces.title", { flat: groupBy === "flat" }, { fallback: groupBy === "flat" ? t("section.sessions") : t("section.workspaces") })
+ 							}),
+ 							wide && (0, react_jsx_runtime.jsx)("div", {
+ 								className: clsx(WorkspaceBrowser_module_css_default.searchSlot, searchExpanded && WorkspaceBrowser_module_css_default.searchSlotExpanded),
+@@ -3964,7 +4157,7 @@ window.__ModuleLoader__.load({
  						className: WorkspaceBrowser_module_css_default.listArea,
  						children: wide && (normalizedQuery !== "" ? (0, react_jsx_runtime.jsx)(SearchResults, {
  							usePanelInfo,
@@ -451,8 +524,13 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  							useSessionStatus,
  							open: openSearchResult,
  							onUnarchive: onSessionUnarchive,
- 							workspaces,
-@@ -3979,8 +4140,10 @@
+@@ -3974,12 +4167,15 @@ window.__ModuleLoader__.load({
+ 							query: normalizedQuery,
+ 							remote: remoteSearch,
+ 							resultLimit: searchResultLimit,
++							renderSlot,
+ 							t
+ 						}) : groupBy === "flat" ? (0, react_jsx_runtime.jsx)(FlatList, {
  							usePanelInfo,
  							list,
  							sessionIds: orderedFlatSessionIds,
@@ -462,9 +540,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  							onLeaveArchivedOnly: leaveArchivedOnly,
  							workspaceReady,
  							animationResetKey: `${groupBy}/${orderBy}/${archivedFilter}`,
- 							useSessionStatus,
-@@ -4006,8 +4169,10 @@
- 							groupExpansion,
+@@ -4007,6 +4203,8 @@ window.__ModuleLoader__.load({
  							setGroupExpanded: actions.setGroupExpanded,
  							setSessionOrder: saveSessionOrder,
  							rowState,
@@ -473,9 +549,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  							onLeaveArchivedOnly: leaveArchivedOnly,
  							startSession,
  							open: guardedOpen,
- 							insertWorkspaceBefore,
-@@ -4025,9 +4190,10 @@
- 							},
+@@ -4026,7 +4224,8 @@ window.__ModuleLoader__.load({
  							onDeleteRequest: (workspaceId, title) => {
  								setDeleteTarget({
  									workspaceId,
@@ -485,9 +559,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  								});
  								setDeleteError(null);
  							}
- 						}))
-@@ -4855,8 +5021,9 @@
- 			"status.compact.approval": "待审批",
+@@ -4856,6 +5055,7 @@ window.__ModuleLoader__.load({
  			"status.compact.planReview": "计划待审",
  			"status.compact.answer": "待回答",
  			"status.completed": "已完成",
@@ -495,9 +567,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			"hover.created": "创建于 {time}",
  			"hover.copied": "已复制",
  			"date.ymd": "{y}年{m}月{d}日",
- 			"time.now": "刚刚",
-@@ -4977,8 +5144,9 @@
- 			"status.compact.approval": "Approval",
+@@ -4978,6 +5178,7 @@ window.__ModuleLoader__.load({
  			"status.compact.planReview": "Plan review",
  			"status.compact.answer": "Answer",
  			"status.completed": "Completed",
@@ -505,9 +575,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  			"hover.created": "Created {time}",
  			"hover.copied": "Copied",
  			"date.ymd": "{y}-{m}-{d}",
- 			"time.now": "now",
-@@ -5178,8 +5346,10 @@
- 					rowToast.set(null);
+@@ -5179,6 +5380,8 @@ window.__ModuleLoader__.load({
  				}
  			});
  			const browserInjected = () => ({
@@ -516,9 +584,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  				startSession: (workspaceId, options) => {
  					uiWorkspace.startSession(workspaceId, options);
  				},
- 				open: openSession,
-@@ -5192,9 +5362,9 @@
- 				renameWorkspace: async (workspaceId, title) => {
+@@ -5193,7 +5396,7 @@ window.__ModuleLoader__.load({
  					await workspaces.rename(workspaceId, title);
  				},
  				deleteWorkspace: async (workspaceId) => {
@@ -527,9 +593,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  				},
  				insertWorkspaceBefore: async (workspaceId, beforeWorkspaceId) => {
  					await workspaces.insertBefore(workspaceId, beforeWorkspaceId);
- 				},
-@@ -5208,8 +5378,10 @@
- 				setDirectoryBusy: shortcutControls.directoryBusy,
+@@ -5209,6 +5412,8 @@ window.__ModuleLoader__.load({
  				hooks: {
  					directoryFlow: browserFlowSource,
  					hostInfo,
@@ -538,12 +602,37 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js b/n
  					workspaceShortcuts: shortcutControls.state,
  					shortcuts: ctx.shortcuts.catalog
  				}
- 			});
+@@ -5220,6 +5425,8 @@ window.__ModuleLoader__.load({
+ 			ctx.slots.inject("sidebar.workspaces", () => ctx.slots.register({
+ 				name: "sidebar.workspaces",
+ 				children: {
++					"sidebar.workspaces.title": { kind: "single", scope: "root" },
++					"sidebar.workspaces.collection": { kind: "single", scope: "root" },
+ 					"sidebar.workspaces.directoryFlow": {
+ 						kind: "single",
+ 						scope: "root"
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/contract/slots.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/contract/slots.d.ts
+index ef666cc..3ef4915 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/contract/slots.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/contract/slots.d.ts
-@@ -225,8 +225,10 @@
-          * lifetime, so facts read there would freeze at whatever the first render
+@@ -105,6 +105,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
+             scope: 'root';
+             owner: DirectoryFlowOwnerProps;
+         };
++        'sidebar.workspaces.title': { kind: 'single'; scope: 'root'; owner: { flat: boolean } };
++        /** Compose projects and unassigned rows while retaining native row actions. */
++        'sidebar.workspaces.collection': {
++            kind: 'single'; scope: 'root';
++            owner: {
++                mode: 'projects' | 'flat' | 'search'; query: string; archivedOnly: boolean;
++                projects: (active: boolean) => import('react').ReactNode;
++                items: ReadonlyArray<{ id: string; updatedAt: number; pinned?: boolean; blank?: boolean; render: (active: boolean) => import('react').ReactNode }>;
++            };
++        };
+         /** Directory-flow hole under the sidebar browsing region (declared by the WorkspaceBrowser entry). */
+         'sidebar.workspaces.directoryFlow': {
+             kind: 'single';
+@@ -226,6 +236,8 @@ export type WorkspaceBrowserInjected = {
           * saw. Select the field the surface needs (`info => info.home`).
           */
          hostInfo: HostObservable<RemoteHostFacts>;
@@ -552,9 +641,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
          workspaceShortcuts: HostObservable<WorkspaceShortcutState>;
          shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>;
      };
-     /** Open the browser search and focus its input. */
-@@ -254,15 +256,17 @@
-         hasMore: boolean;
+@@ -255,13 +267,15 @@ export type WorkspaceBrowserInjected = {
      }>;
      /** Maximum number of merged rows rendered for one search. */
      searchResultLimit: number;
@@ -571,12 +658,20 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>;
      /**
       * Reorder a Workspace in the durable registry display order.
-      * Omitted anchor appends to the end.
+@@ -448,7 +462,7 @@ export type SessionArchiveConfirmProps = PropsRuntime<'shell.overlay'> & PropsLo
+ /** Props of the existing overlay's keyed notice dispatcher. */
+ export type RowToastProps = PropsRuntime<'shell.overlay'> & PropsRenderSlots<'workspace.toast'> & Pick<RowToastInjected, 'dismissToast'> & PropsHooks<RowToastInjected['hooks']>;
+ /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */
+-export type WorkspaceBrowserProps = PropsRuntime<'sidebar.workspaces'> & PropsRenderSlots<'sidebar.workspaces.directoryFlow' | 'sidebar.workspaces.session.menu.item' | 'sidebar.workspaces.session.row.action' | 'sidebar.session.row.leading' | 'sidebar.session.row.hover'> & PropsStore<WorkspaceViewStoreHandle> & Omit<WorkspaceBrowserInjected, 'hooks'> & PropsHooks<WorkspaceBrowserInjected['hooks']> & PropsLocale<'workspace'>;
++export type WorkspaceBrowserProps = PropsRuntime<'sidebar.workspaces'> & PropsRenderSlots<'sidebar.workspaces.title' | 'sidebar.workspaces.collection' | 'sidebar.workspaces.directoryFlow' | 'sidebar.workspaces.session.menu.item' | 'sidebar.workspaces.session.row.action' | 'sidebar.session.row.leading' | 'sidebar.session.row.hover'> & PropsStore<WorkspaceViewStoreHandle> & Omit<WorkspaceBrowserInjected, 'hooks'> & PropsHooks<WorkspaceBrowserInjected['hooks']> & PropsLocale<'workspace'>;
+ /**
+  * Picker-private injected share. Pick semantics remain in the owner's onPick
+  * callback; this callback creates only the real Host Workspace. A type alias
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/locales.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/locales.d.ts
+index fe88429..f00c532 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/locales.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/locales.d.ts
-@@ -113,8 +113,9 @@
-     'status.compact.approval': string;
+@@ -114,6 +114,7 @@ export declare const zh: {
      'status.compact.planReview': string;
      'status.compact.answer': string;
      'status.completed': string;
@@ -584,9 +679,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      'hover.created': string;
      'hover.copied': string;
      'date.ymd': string;
-     'time.now': string;
-@@ -237,8 +238,9 @@
-     'status.compact.approval': string;
+@@ -238,6 +239,7 @@ export declare const en: {
      'status.compact.planReview': string;
      'status.compact.answer': string;
      'status.completed': string;
@@ -594,12 +687,11 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      'hover.created': string;
      'hover.copied': string;
      'date.ymd': string;
-     'time.now': string;
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/navigation.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/navigation.d.ts
+index 18081be..09340ff 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/navigation.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/navigation.d.ts
-@@ -4,8 +4,13 @@
- import type { ISessions, SessionTarget } from '@deepseek-ai/dsh-api-session-controller/client';
+@@ -5,6 +5,11 @@ import type { ISessions, SessionTarget } from '@deepseek-ai/dsh-api-session-cont
  import type { IWorkspaces, WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client';
  import type { SessionId } from '@deepseek-ai/dsh-session/types';
  import type { DraftInitializationOptions } from '@deepseek-ai/dsh-client-ui-conversation/client';
@@ -611,13 +703,13 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
  import type { RowToast } from './contract/slots.ts';
  import type { WorkspaceViewStoreActions } from './stores.ts';
  /** Content preparation and Agent preset for the Session a Workspace flow opens. */
- export interface StartSessionOptions extends DraftInitializationOptions {
-@@ -17,9 +22,18 @@
-     /**
+@@ -18,7 +23,18 @@ export interface UiWorkspace {
       * Select a Session and show its Conversation as one UI navigation action.
       * @param target - known Session identity or durable direct-parent subagent address to display.
       */
 -    openSession(target: SessionTarget): void;
++    /** Observe explicit navigation; returning true for new handles the global New Session action. */
++    registerNavigationHandler(handler: (intent: 'open' | 'new', workspaceId?: WorkspaceId) => boolean | void): () => void;
 +    registerSessionOpener(handler: (sessionId: SessionId, source?: SessionNavigationSource, context?: SessionNavigationContext) => boolean): () => void;
 +    registerSessionReuseFilter(handler: (sessionId: SessionId) => boolean): () => void;
 +    registerSessionFilter(filter: (sessionId: SessionId) => boolean, subscribe: (listener: () => void) => () => void): () => void;
@@ -631,9 +723,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      /**
       * Connect a Workspace and open its Session unless a later navigation supersedes it.
       * @param workspaceId - target Workspace.
-      * @param beforeOpen - optional synchronous preparation for the selected Session,
-@@ -37,8 +51,9 @@
-      * @param options - optional permission to start source migration; omission preserves the Host default.
+@@ -38,6 +54,7 @@ export interface UiWorkspace {
       * @returns the child SessionId after creation and inherited-title increment.
       */
      forkSession(sessionId: SessionId, onCreated?: (childId: SessionId) => void, options?: Pick<Parameters<ISessions['fork']>[0], 'allowMigration'>): Promise<SessionId>;
@@ -641,9 +731,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      /**
       * Resolve the Session for a new conversation in a Workspace: the Host reuses
       * the first listed blank member while it is reusable and otherwise creates one,
-      * under the requested preset or the Host default.
-@@ -53,8 +68,9 @@
-      * @param workspaceId - explicit target; absent inherits the current or most recent Workspace.
+@@ -54,6 +71,7 @@ export interface UiWorkspace {
       * @param options - initial content and the reused blank's preset; existing text or attachments
       * are preserved unless clearPreviousDraft is true.
       */
@@ -651,9 +739,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void;
      /**
       * Archive a Session and clear it when it is the current selection.
-      * @param sessionId - Session to archive.
-@@ -125,17 +141,27 @@
-     private readonly connecting;
+@@ -126,6 +144,16 @@ declare class UiWorkspaceService extends Service implements UiWorkspace {
      private readonly lifetime;
      private readonly selection;
      private mainReference;
@@ -670,8 +756,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      /**
       * @param ctx - Client root Context.
       * @param directoryPicker - the directory-picking Remote namespace.
-      * @param workspaces - pure Workspace Controller.
-      * @param sessions - pure Session Controller.
+@@ -134,7 +162,7 @@ declare class UiWorkspaceService extends Service implements UiWorkspace {
       * @param view - the browser's viewing-store write set (one instance shared with its registration).
       * @param notify - show one notice through the Workspace notice channel.
       */
@@ -680,13 +765,13 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      connectWorkspace(workspaceId: WorkspaceId, options?: Pick<StartSessionOptions, 'agentPreset'>): Promise<SessionId>;
      /**
       * @param reuse - preset for the reused or created blank; absent creates a fresh Session.
-      */
-@@ -154,12 +180,23 @@
-      * Session's projections are reloaded before the preset is read; a Session
+@@ -155,10 +183,23 @@ declare class UiWorkspaceService extends Service implements UiWorkspace {
       * that still awaits a format migration reloads only those cached hints.
       */
      private restoreBlank;
 -    openSession(target: SessionTarget): void;
++    /** Observe explicit navigation; returning true for new handles the global New Session action. */
++    registerNavigationHandler(handler: (intent: 'open' | 'new', workspaceId?: WorkspaceId) => boolean | void): () => void;
 +    registerSessionOpener(handler: (sessionId: SessionId, source?: SessionNavigationSource, context?: SessionNavigationContext) => boolean): () => void;
 +    registerSessionReuseFilter(handler: (sessionId: SessionId) => boolean): () => void;
 +    registerSessionFilter(filter: (sessionId: SessionId) => boolean, subscribe: (listener: () => void) => () => void): () => void;
@@ -705,25 +790,22 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void;
      private prepareDraft;
      private draftPreparationFailed;
-     archiveSession(sessionId: SessionId, options?: {
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/rows/WorkspaceBrowser.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/rows/WorkspaceBrowser.d.ts
+index 4532194..8abccfe 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/rows/WorkspaceBrowser.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/rows/WorkspaceBrowser.d.ts
-@@ -3,6 +3,6 @@
-  * Render the browsing region.
+@@ -4,5 +4,5 @@ import type { WorkspaceBrowserProps } from '../contract/slots.ts';
   * @param props - composed slot props (shell owner share + store + injected actions).
   * @returns the region element tree.
   */
 -export declare function WorkspaceBrowser({ wide, usePanelInfo, expandSidebar, useSessions, useSessionStatus, useWorkspaces, useStore, actions, startSession, open, requestSessionRename, notifyArchivedNotOpenable, renameWorkspace, deleteWorkspace, insertWorkspaceBefore, unarchiveSession, createWorkspace, searchSessions, searchResultLimit, useDirectoryFlow, useHostInfo, useShortcuts, useWorkspaceShortcuts, requestSearch, requestAddWorkspace, closeAddWorkspace, setDirectoryBusy, renderSlot, t, }: WorkspaceBrowserProps): import("react").JSX.Element;
--//# sourceMappingURL=WorkspaceBrowser.d.ts.map
-\ No newline at end of file
 +export declare function WorkspaceBrowser({ wide, usePanelInfo, expandSidebar, useSessions, useSessionStatus, useWorkspaces, useStore, actions, startSession, open, requestSessionRename, notifyArchivedNotOpenable, renameWorkspace, deleteWorkspace, insertWorkspaceBefore, unarchiveSession, createWorkspace, searchSessions, searchResultLimit, isSessionVisible, isWorkspaceVisible, useDirectoryFlow, useHostInfo, useSessionVisibility, useWorkspaceVisibility, useShortcuts, useWorkspaceShortcuts, requestSearch, requestAddWorkspace, closeAddWorkspace, setDirectoryBusy, dismissForkError, renderSlot, t, }: WorkspaceBrowserProps): import("react").JSX.Element;
-+//# sourceMappingURL=WorkspaceBrowser.d.ts.map
+ //# sourceMappingURL=WorkspaceBrowser.d.ts.map
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/stores.d.ts b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/stores.d.ts
+index 4e20866..d4d260f 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/stores.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/stores.d.ts
-@@ -22,8 +22,10 @@
-     /** Explicit group expansion keyed by Workspace identity, including descendants in tree mode. */
+@@ -23,6 +23,8 @@ type WorkspaceViewState = {
      groupExpansion: Record<string, boolean>;
      /** Saved manual order per Workspace group plus the browser-local flat-list account. */
      sessionOrderByAccount: Record<string, string[]>;
@@ -732,9 +814,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      /** Archived-row visibility; omitted in pre-filter v5 snapshots and read as 'default'. */
      archivedFilter?: ArchivedFilter;
  };
- type SessionOrderSource = {
-@@ -35,8 +37,10 @@
-  * Annotation twin of the actions literal below (the export needs a declared
+@@ -36,6 +38,8 @@ type SessionOrderSource = {
   * return type); drift fails assignability at the defineStore call.
   */
  type WorkspaceViewActions = {
@@ -743,4 +823,3 @@ diff --git a/node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/types/client/
      setGroupBy: (draft: WorkspaceViewState, mode: SessionGroupBy) => void;
      setOrderBy: (draft: WorkspaceViewState, mode: SessionOrderBy, initialOrders: Readonly<Record<string, readonly string[]>>) => void;
      setGroupExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void;
-     retainAccountKeys: (draft: WorkspaceViewState, workspaceKeys: readonly string[]) => void;

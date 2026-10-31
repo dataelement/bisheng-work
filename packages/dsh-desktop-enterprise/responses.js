@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { stream as streamResponses } from '@earendil-works/pi-ai/api/openai-responses'
 import { LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { normalizeAuditContext } from './contract.js'
-import { parseSseEvents, projectEnterpriseMessagesForTextModel, responseFailure, streamAttributionHeaders } from './openai.js'
+import { contentSafetyFormatterForStream, parseSseEvents, projectEnterpriseMessagesForTextModel, requestFailure, responseFailure, streamAttributionHeaders } from './openai.js'
 import { enforceEnterpriseRequestSize, projectEnterpriseOffloadedImages, readEnterpriseRequestImages } from './request-images.js'
 
 const TRANSPORT_URL = 'https://enterprise.invalid/v1/responses'
@@ -10,6 +10,17 @@ const LIMITS = { event: 8 * 1024 * 1024, total: 32 * 1024 * 1024 }
 const hashContent = (content) => createHash('sha256').update(JSON.stringify(content)).digest('hex')
 const text = (blocks) => blocks.filter((block) => block.type === 'text').map((block) => block.text).join('')
 const callId = (id) => String(id).split('|')[0]
+
+function completeToolArguments(value) {
+  if (typeof value !== 'string') return false
+  try {
+    const parsed = JSON.parse(value)
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+  } catch {
+    // pi-ai repairs partial JSON for streaming display; that is insufficient for tool execution.
+    return false
+  }
+}
 
 function nativeContent(blocks, images) {
   return blocks.flatMap((block) => {
@@ -78,6 +89,7 @@ export function serializeResponsesRequest(options, model, images, connectionKey,
 
 /** Use pi-ai's public Responses engine with a transport owned by the enterprise broker. */
 export async function* streamEnterpriseResponses(options, model, hooks, connectionKey, session) {
+  const localizeContentSafety = contentSafetyFormatterForStream(options, hooks)
   if (!connectionKey || !hooks.requestResponses) throw new LlmError('Enterprise models are unavailable.', 'MISSING_CREDENTIAL')
   const assertAccount = () => {
     options.signal?.throwIfAborted()
@@ -105,14 +117,22 @@ export async function* streamEnterpriseResponses(options, model, hooks, connecti
   let terminalUsage
   let frames
   let failure
+  let invalidToolArguments = false
   let sequence = -1
   const transport = async (url, init) => {
     if (String(url) !== TRANSPORT_URL || init?.method !== 'POST') throw new LlmError('Invalid enterprise transport route.', 'INVALID_REQUEST')
     assertAccount()
-    const response = await hooks.requestResponses(request, signal, headers, connectionKey)
-    assertAccount()
-    if (!response.ok) throw await responseFailure(response)
-    if (!response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) throw new LlmError('Expected enterprise SSE response.', 'INVALID_RESPONSE')
+    let response
+    try {
+      response = await hooks.requestResponses(request, signal, headers, connectionKey)
+      assertAccount()
+      if (!response.ok) throw await responseFailure(response, localizeContentSafety)
+      if (!response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) throw new LlmError('Expected enterprise SSE response.', 'INVALID_RESPONSE')
+    } catch (error) {
+      // pi-ai wraps transport errors; retain the broker's structured safety failure.
+      failure = error
+      throw error
+    }
     frames = parseSseEvents(response.body, signal, LIMITS)
     return new Response(new ReadableStream({
       async pull(out) {
@@ -121,12 +141,27 @@ export async function* streamEnterpriseResponses(options, model, hooks, connecti
           const frame = await frames.next()
           if (frame.done) { out.close(); return }
           const payload = JSON.parse(frame.value.data)
-          if (payload.type === 'error' || frame.value.event === 'error') throw new LlmError('Enterprise model request failed.', 'UPSTREAM_ERROR')
+          // Terminal Gateway errors have no sequence_number and must win over data validation.
+          if (payload.type === 'error' || frame.value.event === 'error') {
+            throw requestFailure(200, response.headers.get('x-request-id') ?? undefined, payload, localizeContentSafety)
+          }
           if (terminal || !Number.isSafeInteger(payload.sequence_number) || payload.sequence_number <= sequence) throw new LlmError('Invalid Responses event sequence.', 'INVALID_RESPONSE')
           sequence = payload.sequence_number
+          if (payload.type === 'response.function_call_arguments.done' && !completeToolArguments(payload.arguments)) invalidToolArguments = true
+          if (payload.type === 'response.output_item.done' && payload.item?.type === 'function_call' && !completeToolArguments(payload.item.arguments)) {
+            invalidToolArguments = true
+          }
           if (['response.completed', 'response.failed', 'response.incomplete'].includes(payload.type)) {
             terminal = payload.response
             terminalUsage = terminal?.usage
+            if (payload.type === 'response.completed' && (terminal?.status !== 'completed' || !Array.isArray(terminal.output))) {
+              throw new LlmError('Responses terminal status is invalid.', 'INVALID_RESPONSE')
+            }
+            if (payload.type === 'response.completed') {
+              for (const item of terminal.output) {
+                if (item.type === 'function_call' && !completeToolArguments(item.arguments)) invalidToolArguments = true
+              }
+            }
           }
           out.enqueue(new TextEncoder().encode(`event: ${frame.value.event}\ndata: ${frame.value.data}\n\n`))
         } catch (error) {
@@ -161,18 +196,29 @@ export async function* streamEnterpriseResponses(options, model, hooks, connecti
         const tool = tools.get(index)
         yield { type: 'tool-call-delta', index, id: ToolCallId(tool.id), name: tool.name, argumentsDelta: event.delta }
       } else if (['text_end', 'thinking_end', 'toolcall_end'].includes(event.type)) {
+        if (event.type === 'toolcall_end' && (event.toolCall.argumentsError || event.toolCall.arguments === null ||
+            typeof event.toolCall.arguments !== 'object' || Array.isArray(event.toolCall.arguments))) invalidToolArguments = true
         const block = event.type === 'text_end' ? { type: 'text', text: event.content }
           : event.type === 'thinking_end' ? { type: 'reasoning', text: event.content }
             : { type: 'tool-call', id: ToolCallId(event.toolCall.id), name: event.toolCall.name, arguments: JSON.stringify(event.toolCall.arguments) }
         completed.set(index, block)
-        yield { type: 'block-end', index, block }
+        // Arguments may be complete while a later output domain still causes a safety error.
+        if (block.type !== 'tool-call') yield { type: 'block-end', index, block }
       } else if (event.type === 'error') {
         if (failure) throw failure
         signal.throwIfAborted()
         throw new LlmError('Enterprise Responses generation failed.', 'UPSTREAM_ERROR')
       } else if (event.type === 'done') {
+        if (failure) throw failure
         assertAccount()
         if (!terminal || terminal.status === 'failed' || !Array.isArray(terminal.output)) throw new LlmError('Responses stream closed without valid output.', 'STREAM_CLOSED')
+        const reason = event.reason === 'toolUse' ? { kind: 'tool-calls' } : event.reason === 'length' ? { kind: 'max-tokens' } : { kind: 'stop' }
+        if (reason.kind !== 'max-tokens') {
+          if (invalidToolArguments) throw new LlmError('Responses tool arguments are incomplete.', 'INVALID_RESPONSE')
+          for (const [index, block] of [...completed.entries()].sort(([a], [b]) => a - b)) {
+            if (block.type === 'tool-call') yield { type: 'block-end', index, block }
+          }
+        }
         const u = terminalUsage
         if (u && [u.input_tokens, u.output_tokens, u.total_tokens].every((n) => Number.isSafeInteger(n) && n >= 0) && u.input_tokens + u.output_tokens === u.total_tokens) {
           const read = Number.isSafeInteger(u.input_tokens_details?.cached_tokens) && u.input_tokens_details.cached_tokens >= 0 ? u.input_tokens_details.cached_tokens : undefined
@@ -185,7 +231,6 @@ export async function* streamEnterpriseResponses(options, model, hooks, connecti
             ...(safe && write !== undefined ? { cacheWriteTokens: write } : {})
           } }
         }
-        const reason = event.reason === 'toolUse' ? { kind: 'tool-calls' } : event.reason === 'length' ? { kind: 'max-tokens' } : { kind: 'stop' }
         const content = [...completed.entries()].sort(([a], [b]) => a - b).map(([, block]) => block)
         yield { type: 'finish', reason, replayState: { response: {
           kind: 'enterprise-responses', version: 1, connectionKey, model: model.id,
@@ -196,6 +241,8 @@ export async function* streamEnterpriseResponses(options, model, hooks, connecti
     }
     throw new LlmError('Responses stream closed before completion.', 'STREAM_CLOSED')
   } finally {
+    completed.clear()
+    tools.clear()
     controller.abort()
     await frames?.return()
   }

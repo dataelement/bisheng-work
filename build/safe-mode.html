@@ -214,25 +214,37 @@
       }
       const params = new URLSearchParams(location.search)
       const model = JSON.parse(params.get('state') || '{}')
-      document.documentElement.lang = model.locale === 'zh' ? 'zh-CN' : 'en'
       document.documentElement.dataset.theme = params.get('theme') || 'system'
-      document.title = `${model.badge || 'Safe Mode'} · ${model.brand || 'BISHENG'}`
       const setText = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value || '' }
-      setText('page-title', model.locale === 'zh' ? '管理插件' : 'Manage plugins')
-      setText('heading', model.heading)
-      setText('summary', model.summary)
-      setText('empty', model.emptyMessage)
-      setText('selection-hint', model.selectionHint)
-      setText('safety-note', model.safetyNote)
-      setText('apply', model.applyLabel)
-      setText('restart', model.restartLabel)
-      setText('quit', model.quitLabel)
-      setText('community-label', model.locale === 'zh' ? '遇到问题？来社区交流' : 'Need help? Join our community')
-      setText('community-wechat-label', model.locale === 'zh' ? '微信群' : 'WeChat')
-      setText('wechat-caption', model.locale === 'zh' ? '扫码加入 DSH 用户群' : 'Scan to join the DSH community')
+      const renderLocale = () => {
+        document.documentElement.lang = model.locale === 'zh' ? 'zh-CN' : 'en'
+        document.title = `${model.badge} · ${model.brand}`
+        setText('page-title', model.locale === 'zh' ? '管理插件' : 'Manage plugins')
+        for (const [id, key] of Object.entries({ heading: 'heading', summary: 'summary', empty: 'emptyMessage', 'selection-hint': 'selectionHint', 'safety-note': 'safetyNote', quit: 'quitLabel', 'recovery-open': 'recoveryOpenLabel' })) setText(id, model[key])
+        for (const [id, key] of [['apply', 'apply'], ['restart', 'restart']]) {
+          const button = document.getElementById(id)
+          setText(id, model[`${key}${button.dataset.busy === 'true' ? 'Busy' : ''}Label`])
+        }
+        setText('community-label', model.locale === 'zh' ? '遇到问题？来社区交流' : 'Need help? Join our community')
+        setText('community-wechat-label', model.locale === 'zh' ? '微信群' : 'WeChat')
+        setText('wechat-caption', model.locale === 'zh' ? '扫码加入 DSH 用户群' : 'Scan to join the DSH community')
+        document.getElementById('wechat-qr').alt = model.locale === 'zh' ? 'DSH 用户群二维码' : 'DSH community WeChat QR code'
+        document.getElementById('community-discord').title = model.locale === 'zh' ? '在浏览器中打开 Discord 社区' : 'Open our Discord community in your browser'
+        document.getElementById('select-all').setAttribute('aria-label', model.selectAllLabel)
+        const notice = document.getElementById('notice')
+        setText('notice-preview', model.noticeSummary || model.notice)
+        const details = document.getElementById('notice-details')
+        details.hidden = !model.noticeSummary
+        setText('notice-details-label', model.locale === 'zh' ? '查看详细信息' : 'View details')
+        setText('notice-full', model.notice)
+        notice.classList.toggle('visible', Boolean(model.notice))
+        notice.classList.toggle('success', model.noticeTone === 'success')
+        notice.classList.toggle('error', model.noticeTone !== 'success')
+        setText('repair-agent', model.locale === 'zh' ? '让智能修复助手分析日志 →' : 'Let the repair agent read the log →')
+      }
+      renderLocale()
       const wechat = document.getElementById('community-wechat')
       const wechatPopover = document.getElementById('wechat-popover')
-      document.getElementById('wechat-qr').alt = model.locale === 'zh' ? 'DSH 用户群二维码' : 'DSH community WeChat QR code'
       let wechatCloseTimer
       const positionWechat = () => {
         const anchor = wechat.getBoundingClientRect()
@@ -268,22 +280,6 @@
       wechatPopover.addEventListener('toggle', () => wechat.setAttribute('aria-expanded', String(wechatPopover.matches(':popover-open'))))
       window.addEventListener('resize', closeWechat)
       document.addEventListener('scroll', closeWechat, true)
-      document.getElementById('community-discord').title = model.locale === 'zh'
-        ? '在浏览器中打开 Discord 社区'
-        : 'Open our Discord community in your browser'
-      document.getElementById('select-all').setAttribute('aria-label', model.selectAllLabel || 'Select all')
-      setText('recovery-open', model.recoveryOpenLabel)
-      const notice = document.getElementById('notice')
-      if (model.notice) {
-        setText('notice-preview', model.noticeSummary || model.notice)
-        if (model.noticeSummary) {
-          const details = document.getElementById('notice-details')
-          details.hidden = false
-          setText('notice-details-label', model.locale === 'zh' ? '查看详细信息' : 'View details')
-          setText('notice-full', model.notice)
-        }
-        notice.classList.add('visible', model.noticeTone === 'success' ? 'success' : 'error')
-      }
       const list = document.getElementById('items')
       const empty = document.getElementById('empty')
       const apply = document.getElementById('apply')
@@ -299,11 +295,12 @@
       const syncUpgradeAll = () => {
         const visible = Boolean(model.upgradeAllLabel) && model.upgradeReadyCount > 0 && model.recoveryLocked !== true
         upgradeAll.hidden = !visible
-        if (visible) upgradeAll.textContent = model.upgradeAllLabel
+        if (visible) upgradeAll.textContent = upgradeAll.dataset.busy === 'true' ? model.upgradeAllBusyLabel : model.upgradeAllLabel
       }
       syncUpgradeAll()
       const pluginCheckboxes = []
       const issueCheckboxes = []
+      const issueRows = new Map()
       for (const group of Array.isArray(model.issueGroups) ? model.issueGroups : []) {
         const item = document.createElement('li'); item.className = 'issue-group'
         const label = document.createElement('label'); label.className = 'issue'
@@ -327,6 +324,7 @@
           finding.append(findingName, findingDetail); findings.appendChild(finding)
         }
         details.append(detailsSummary, findings); item.appendChild(details)
+        issueRows.set(String(group.id), { badge, meta, action, detailsSummary, findings })
       }
       let pluginItems = Array.isArray(model.pluginItems)
         ? model.pluginItems
@@ -350,7 +348,12 @@
           else if (plugin.statusTone === 'success') status.classList.add('success')
           row.title.appendChild(status)
         }
-        if (row.upgradeBtn?.disabled) return
+        row.action.textContent = String(plugin.actionLabel || '')
+        if (row.enableBtn) row.enableBtn.textContent = row.enableBtn.disabled ? model.enableBusyLabel : plugin.enableButtonLabel
+        if (row.upgradeBtn?.disabled) {
+          row.upgradeBtn.textContent = model.locale === 'zh' ? '正在升级…' : 'Upgrading…'
+          return
+        }
         row.upgradeBtn?.remove()
         row.upgradeBtn = undefined
         if (plugin.upgradeButtonLabel) {
@@ -387,8 +390,9 @@
         else label.append(checkbox, copy)
         item.appendChild(label)
 
+        let enableBtn
         if (plugin.enableButtonLabel) {
-          const enableBtn = document.createElement('button')
+          enableBtn = document.createElement('button')
           enableBtn.type = 'button'
           enableBtn.className = 'plugin-upgrade-btn plugin-enable-btn'
           enableBtn.textContent = String(plugin.enableButtonLabel)
@@ -404,7 +408,7 @@
           item.appendChild(enableBtn)
         }
 
-        const row = { item, title, upgradeBtn: undefined }
+        const row = { item, title, action, enableBtn, upgradeBtn: undefined }
         decoratePluginRow(row, plugin)
         pluginRows.set(String(plugin.name), row)
 
@@ -418,8 +422,20 @@
         if (String(data.seq) !== String(params.get('seq') ?? '')) return
         const next = data.model
         if (!next || typeof next !== 'object') return
-        model.upgradeAllLabel = next.upgradeAllLabel
-        model.upgradeReadyCount = next.upgradeReadyCount
+        Object.assign(model, next)
+        renderLocale()
+        for (const group of model.issueGroups || []) {
+          const row = issueRows.get(String(group.id))
+          if (!row) continue
+          row.badge.textContent = group.severityLabel
+          row.meta.textContent = [group.kindLabel, group.countLabel].filter(Boolean).join(' · ')
+          row.action.textContent = group.actionLabel || ''
+          row.detailsSummary.textContent = group.detailLabel || group.countLabel || ''
+          for (const [index, issue] of (group.issues || []).entries()) {
+            const detail = row.findings.children[index]?.querySelector('.finding-detail')
+            if (detail) detail.textContent = [issue.kindLabel, issue.versionLabel, issue.detail].filter(Boolean).join(' · ')
+          }
+        }
         if (Array.isArray(next.pluginItems)) pluginItems = next.pluginItems
         for (const plugin of pluginItems) {
           const row = pluginRows.get(String(plugin.name))
@@ -451,6 +467,7 @@
           try { return JSON.parse(checkbox.dataset.issueIds || '[]') } catch { return [] }
         })
         if (plugins.length === 0 && issues.length === 0) return
+        apply.dataset.busy = 'true'
         apply.disabled = true; apply.textContent = model.applyBusyLabel; restart.disabled = true
         if (upgradeAll) upgradeAll.disabled = true
         void window.dshSafeMode.action('apply', { plugins, issues })
@@ -458,6 +475,7 @@
       upgradeAll.addEventListener('click', () => {
         const targets = pluginItems.filter((p) => p.upgradeReady).map((p) => p.name)
         if (targets.length === 0) return
+        upgradeAll.dataset.busy = 'true'
         upgradeAll.disabled = true
         upgradeAll.textContent = model.upgradeAllBusyLabel || (model.locale === 'zh' ? '正在升级…' : 'Upgrading…')
         apply.disabled = true
@@ -467,6 +485,7 @@
       recoveryOpen.addEventListener('click', () => { recoveryOpen.disabled = true; void window.dshSafeMode.action('recovery-open', {}) })
       restart.addEventListener('click', () => {
         if (model.restartConfirm && !window.confirm(String(model.restartConfirm))) return
+        restart.dataset.busy = 'true'
         restart.disabled = true; restart.textContent = model.restartBusyLabel; apply.disabled = true; if (upgradeAll) upgradeAll.disabled = true; void window.dshSafeMode.action('restart', {})
       })
       document.getElementById('quit').addEventListener('click', () => void window.dshSafeMode.action('quit', {}))
@@ -474,19 +493,16 @@
     <script>
       // Only the request is sent: the main process prepends the offline
       // diagnosis and the failed launch's logs to the first turn.
-      const repairAgentPrompt = model.locale === 'zh'
+      const repairAgentPrompt = () => model.locale === 'zh'
         ? '请结合诊断事实和 harness.log，定位导致启动失败的确切根因。先说明结论和建议的最小可逆操作，在我明确确认之前不要修改任何文件或配置。'
         : 'Using the diagnostic facts and harness.log, find the exact root cause of the startup failure. Explain the conclusion and the smallest reversible fix first, and do not change any file or setting until I explicitly confirm.'
       // One line under the summary: the list below must stay fully visible.
       const repairAgent = document.getElementById('repair-agent')
-      repairAgent.textContent = model.locale === 'zh'
-        ? '不确定是哪个插件？让智能修复 Agent 分析日志 →'
-        : 'Not sure which plugin? Let the repair agent read the log →'
       repairAgent.addEventListener('click', () => {
         repairAgent.disabled = true
         const agentBtn = document.getElementById('agent')
         if (agentBtn) agentBtn.disabled = true
-        void window.dshSafeMode.action('agent', { prompt: repairAgentPrompt })
+        void window.dshSafeMode.action('agent', { prompt: repairAgentPrompt() })
       })
     </script>
   </body>

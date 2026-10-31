@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   ALLOWED_ATTRIBUTION_HEADERS,
   CHAT_HEADER_TIMEOUT_MS,
@@ -148,9 +148,13 @@ describe('desktop chat abort reasons', () => {
     const session = new AbortController()
     const header = new AbortController()
     const combined = AbortSignal.any([caller.signal, session.signal, header.signal])
+    // Observe cancellation as fetch does; Node can resolve unobserved combined signals lazily.
+    const onAbort = vi.fn()
+    combined.addEventListener('abort', onAbort, { once: true })
     session.abort(enterpriseSessionChangedAbortReason())
     header.abort(enterpriseHeaderTimeoutAbortReason())
     caller.abort()
+    expect(onAbort).toHaveBeenCalledTimes(1)
     expect(desktopChatAbortKind(combined.reason)).toBe('session')
     expect(combined.reason).toMatchObject({ status: 409, code: 'enterprise_session_changed' })
   })

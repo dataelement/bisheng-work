@@ -1,33 +1,42 @@
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
+import React from 'react'
+import * as jsx from 'react/jsx-runtime'
+import { Context } from '@deepseek-ai/cordis'
+import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+// Coverage AC: AC-03, AC-30, AC-31, AC-56.
 const source = await readFile(new URL('../packages/dsh-desktop-enterprise/client.js', import.meta.url), 'utf8')
+const localeSource = await readFile(new URL('../node_modules/@deepseek-ai/dsh-client-locale/lib/client.js', import.meta.url), 'utf8')
 const disposers = []
-afterEach(() => { for (const dispose of disposers.splice(0).reverse()) dispose(); vi.useRealTimers() })
+afterEach(async () => { for (const dispose of disposers.splice(0).reverse()) await dispose(); vi.useRealTimers() })
 
 async function client(initial, language = 'zh') {
-  let account = initial, definition, resolveState
+  let account = initial, resolveState
   const events = new Map(), registrations = new Map()
-  const node = () => ({ textContent: '' })
-  const window = {
-    __ModuleLoader__: { load: value => { definition = value } },
-    addEventListener: (name, listener) => events.set(name, listener),
-    removeEventListener: (name) => events.delete(name),
-    setInterval, clearInterval
-  }
-  vm.runInNewContext(source, {
-    window, navigator: { language: 'zh-CN' }, Date, AbortController,
-    document: { documentElement: { lang: 'zh-CN' }, getElementById: () => null, createElement: node, head: { appendChild() {} }, visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
+  const dom = new JSDOM('<html lang="zh-CN"><head></head><body></body></html>', { url: 'http://localhost/' })
+  const window = dom.window, definitions = new Map()
+  const add = window.addEventListener.bind(window), remove = window.removeEventListener.bind(window)
+  window.addEventListener = (name, listener, options) => { events.set(name, listener); add(name, listener, options) }
+  window.removeEventListener = (name, listener, options) => { events.delete(name); remove(name, listener, options) }
+  window.__ModuleLoader__ = { load: value => definitions.set(value.id, value) }
+  disposers.push(() => dom.window.close())
+  vm.runInNewContext(localeSource + '\n' + source, {
+    window, navigator: window.navigator, Date, AbortController, document: window.document,
     fetch: async () => ({ ok: true, json: async () => resolveState ? new Promise(resolve => { resolveState(resolve) }) : structuredClone(account) })
   })
-  const plugin = definition.factory(id => {
-    if (id === 'react') return { createElement: (type, props) => ({ type, props }) }
+  const plugin = definitions.get('dsh-desktop-enterprise').factory(id => {
+    if (id === 'react') return React
     throw new Error(id)
   })
-  const dictionaries = new Map()
+  const { LocaleRuntime } = definitions.get('@deepseek-ai/dsh-client-locale').factory(name =>
+    name === 'react' ? React : name === 'react/jsx-runtime' ? jsx : {})
+  const localeContext = new Context()
+  const locale = new LocaleRuntime(localeContext, undefined, { languages: [language === 'zh' ? 'zh-CN' : 'en-US'], preference: null })
+  disposers.push(() => localeContext.fiber.dispose())
   plugin.apply({
-    locale: { register: (ns, values) => { dictionaries.set(ns, values) }, bind: ns => key => dictionaries.get(ns)[language][key] },
+    locale,
     effect: callback => { const dispose = callback(); if (dispose) disposers.push(dispose) },
     slots: {
       inject: (_slot, callback) => callback(),

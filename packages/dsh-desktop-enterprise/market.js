@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { acceptMarketSnapshot } from './market-policy.js'
 import { installOfflineBundle, sha256, verifyInstalledBundle } from './offline-bundle.js'
 import { createMarketRuntime } from './market-runtime.js'
+import { createManagedMarketSource, performMarketAction } from './managed-market.js'
 
 const PREFIX = '/api/v1/dsh/market'
 const MAX_CATALOG_PAGES = 100
@@ -84,6 +85,15 @@ export function createMarketController(ctx, accountController, options = {}) {
   const assertCurrentOperation = () => {
     if (!cleaning && operationGeneration !== cancellation) throw new Error('Enterprise account changed.')
   }
+  let lastPublishedState = ''
+  const publishState = () => {
+    const current = state()
+    const visible = JSON.stringify([current.accountKey, current.installed])
+    if (visible === lastPublishedState) return
+    lastPublishedState = visible
+    // Minimal non-UI hosts may omit the event bus; the real Harness provides it.
+    ctx.emit?.('plugin-manager/changed', { reason: 'bundle' })
+  }
   const save = async () => {
     assertCurrentOperation()
     if (!directory || !key) return
@@ -91,8 +101,11 @@ export function createMarketController(ctx, accountController, options = {}) {
     const path = join(directory, `${key}.json`), temporary = `${path}.${randomUUID()}.tmp`
     await writeFile(temporary, JSON.stringify(document), { mode: 0o600 })
     await rename(temporary, path)
+    publishState()
   }
-  const identityKey = value => value?.connected ? sha256(`${value.base}|${value.tenant.id}|${value.user.id}`) : null
+  const identityKey = value => value?.connected && typeof value.base === 'string' &&
+    typeof value.tenant?.id === 'string' && typeof value.user?.id === 'string'
+    ? sha256(`${value.base}|${value.tenant.id}|${value.user.id}`) : null
   const request = async (path, body) => {
     assertCurrentOperation()
     const startedEpoch = epoch, startedIdentity = identityKey(accountController.state())
@@ -191,11 +204,12 @@ export function createMarketController(ctx, accountController, options = {}) {
   }
   const state = () => {
     const current = accountController.state()
-    const sameAccount = current.connected && account?.base === current.base && account?.user.id === current.user.id && account?.tenant.id === current.tenant.id
+    const currentKey = identityKey(current)
+    const sameAccount = Boolean(currentKey && currentKey === key)
     return { configured: Boolean(current.connected), base: current.base,
       connected: Boolean(current.connected), online: Boolean(sameAccount && online), target, desktopVersion: desktopVersion(),
       tenant: current.tenant, user: current.user, installed: sameAccount ? document.installed.map(({ directory: _directory, config: _config, ...record }) => record) : [],
-      accountKey: current.connected ? sha256(`${current.base}|${current.tenant.id}|${current.user.id}`) : null,
+      accountKey: currentKey,
       error: lastError, failureCode: sameAccount ? failureCode : undefined }
   }
   const audit = async (input, result) => {
@@ -229,6 +243,7 @@ export function createMarketController(ctx, accountController, options = {}) {
       if (!/^[a-f0-9]{32}$/u.test(input.plugin_id)) throw new Error('Invalid plugin identifier.')
       if (input.config !== undefined && (!input.config || Array.isArray(input.config) || typeof input.config !== 'object' || Buffer.byteLength(JSON.stringify(input.config)) > 65536)) throw new Error('Plugin configuration must be an object under 64 KiB.')
       await bind()
+      if (input.expectedAccountKey !== undefined && input.expectedAccountKey !== key) throw new Error('Enterprise account changed.')
       await audit(input, 'started')
       let operationResult = 'succeeded'
       try {
@@ -322,6 +337,7 @@ export function createMarketController(ctx, accountController, options = {}) {
       for (const record of document.installed) await stopRecord(record)
       await save(); account = null; key = null; policy = null; failureCode = undefined
       document = rememberedInstall(null)
+      publishState()
       }, true)
     },
     tick: () => serialized(async () => {
@@ -337,6 +353,8 @@ export function createMarketController(ctx, accountController, options = {}) {
 
 export function applyEnterpriseMarket(ctx, accountController, options = {}) {
   const market = createMarketController(ctx, accountController, options)
+  const source = createManagedMarketSource(market)
+  ctx.provide('profileManagedBundleSource', source)
   const register = (path, methods, handler) => ctx.connection.fetch.register({ path, methods, requestBody: 'buffered', fetch: async request => {
     try {
       await accountController.refreshState?.()
@@ -355,7 +373,7 @@ export function applyEnterpriseMarket(ctx, accountController, options = {}) {
   register('/api/enterprise.market.action', ['POST'], async request => {
     const body = await request.text()
     if (Buffer.byteLength(body) > 70000) throw new Error('Plugin request exceeds 70 KiB.')
-    return market.act(JSON.parse(body))
+    return performMarketAction(ctx.get('pluginManager'), source, market, JSON.parse(body))
   })
   const tick = async () => { await accountController.refreshState?.(); await market.tick() }
   const timer = setInterval(() => { void tick().catch(() => undefined) }, 60_000)

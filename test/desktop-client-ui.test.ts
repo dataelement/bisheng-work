@@ -30,10 +30,13 @@ describe('BISHENG client slot occupants', () => {
       createElement: vi.fn(() => ({ id: '', dataset: {}, textContent: '', remove: removeStyle })),
       head: { appendChild: (node: { textContent?: string }) => appended.push(node) }
     }
+    const windowEvents = new EventTarget()
     vm.runInNewContext(source, {
       document,
       navigator: { language: 'en-US' },
       window: {
+        addEventListener: windowEvents.addEventListener.bind(windowEvents),
+        removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
         __ModuleLoader__: {
           load: (value: typeof definition) => {
             definition = value
@@ -52,12 +55,19 @@ describe('BISHENG client slot occupants', () => {
       props: { ...props, children }
     })
     const MenuItemButton = vi.fn()
+    let menuOpen = false
+    const setMenuOpen = vi.fn()
+    const effectDisposers: Array<() => void> = []
     const plugin = definition!.factory((id) => {
       if (id === 'react') {
         return {
           createElement,
-          useEffect: (effect: () => void | (() => void)) => effect(),
-          useState: (initial: unknown) => [initial, vi.fn()]
+          useEffect: (effect: () => void | (() => void)) => {
+            const dispose = effect()
+            if (dispose) effectDisposers.push(dispose)
+          },
+          useState: (initial: unknown) => [typeof initial === 'boolean' ? menuOpen : initial, setMenuOpen],
+          useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot()
         }
       }
       if (id === '@deepseek-ai/dsh-client-ui-primitives') {
@@ -93,19 +103,50 @@ describe('BISHENG client slot occupants', () => {
       effect: (setup: () => (() => void) | undefined) => { disposeStyle = setup() }
     })
 
-    expect(plugin.inject).toEqual(['slots', 'locale', 'remote', 'remote.session', 'sessions', 'uiWorkspace'])
+    expect(plugin.inject).toEqual(['slots', 'locale', 'remote', 'remote.session', 'sessions', 'uiWorkspace', 'layout'])
     expect(registrations.map(({ config }) => config.name)).toEqual([
+      'shell.overlay',
+      'sidebar.primaryNavigation',
+      'sidebar.workspaces.title',
+      'desktop.mode.content',
+      'sidebar.workspaces.collection',
       'sidebar.brand.mark',
       'sidebar.brand.name',
       'conversation.hero.brand.mark',
+      'conversation.hero.brand.title',
       'sidebar.right.tab.document.unpreviewable',
       'sidebar.workspaces.session.menu.item',
       'sidebar.workspaces.session.menu.item',
       'sidebar.workspaces.session.menu.item'
     ])
     // Desktop toolbar styles have an owned lifetime; branding stays in currentColor.
-    expect(appended).toHaveLength(1)
-    expect(appended[0]?.textContent).toContain("[data-dsh-preset-search]")
+    expect(appended).toHaveLength(2)
+    // Match Harness panelList spacing without changing navigation's outer padding.
+    expect(appended[0]?.textContent).toContain('.dshPrimaryNavigation{display:flex;flex-direction:column;flex:none;gap:4px;padding:0 0 12px}')
+    expect(appended[0]?.textContent).toContain('.dshPrimaryNavigation[data-wide=false]{gap:12px}')
+    // The in-place dropdown fills its trigger wrapper instead of shrink-wrapping its labels.
+    expect(appended[0]?.textContent).toContain('.dshNavigationMenu .dshNavigationMenuList{width:100%;min-width:0;max-width:100%;box-sizing:border-box}')
+    const primaryNavigation = registrations.find(({ config }) => config.name === 'sidebar.primaryNavigation')!.component
+    for (const wide of [true, false]) {
+      const nav = primaryNavigation({
+        wide, panels: [], navigation: { subscribe: vi.fn(), snapshot: () => ({ mode: 'work' }) }, t: (key: string) => key
+      }) as { props: Record<string, unknown> }
+      expect(nav.props.className).toBe('dshPrimaryNavigation')
+      expect(nav.props['data-wide']).toBe(wide)
+    }
+    // A native WebContentsView steals window focus without an iframe target.
+    menuOpen = true
+    primaryNavigation({
+      wide: true, panels: [], navigation: { subscribe: vi.fn(), snapshot: () => ({ mode: 'chat' }) }, t: (key: string) => key
+    })
+    setMenuOpen.mockClear()
+    windowEvents.dispatchEvent(new Event('blur'))
+    expect(setMenuOpen).toHaveBeenCalledWith(false)
+    effectDisposers.forEach(dispose => dispose())
+    setMenuOpen.mockClear()
+    windowEvents.dispatchEvent(new Event('blur'))
+    expect(setMenuOpen).not.toHaveBeenCalled()
+    expect(appended[1]?.textContent).toContain("[data-dsh-preset-search]")
     disposeStyle?.()
     expect(removeStyle).toHaveBeenCalledOnce()
 
@@ -131,7 +172,7 @@ describe('BISHENG client slot occupants', () => {
 
     const heroMark = registrations.find(
       ({ config }) => config.name === 'conversation.hero.brand.mark'
-    )!.component({ size: 48, className: 'hero-mark' }) as {
+    )!.component({ size: 48, className: 'hero-mark', navigation: { subscribe: vi.fn(), snapshot: () => ({}) } }) as {
       type: unknown
       props: Record<string, unknown>
     }
@@ -151,6 +192,16 @@ describe('BISHENG client slot occupants', () => {
     expect(heroField?.props.fill).toBe('#000000')
     expect(heroPaths).toHaveLength(8)
     expect(heroPaths.every(({ type, props }) => type === 'path' && props.fill === 'white')).toBe(true)
+    const branding = { welcomeMessage: 'Team workspace', assistantIcon: { enabled: true, image: 'https://enterprise.example/custom.svg' } }
+    const navigation = { subscribe: vi.fn(), snapshot: () => ({ navigation: { branding } }) }
+    const configuredMark = registrations.find(({ config }) => config.name === 'conversation.hero.brand.mark')!.component({ size: 34, navigation }) as { type: unknown; props: Record<string, unknown> }
+    expect(configuredMark.type).toBe('img')
+    expect(configuredMark.props.src).toBe(branding.assistantIcon.image)
+    const configuredTitle = registrations.find(({ config }) => config.name === 'conversation.hero.brand.title')!.component({ navigation, t: (key: string) => key }) as { props: Record<string, unknown> }
+    expect(configuredTitle.props.children).toEqual(['Team workspace'])
+    branding.assistantIcon.enabled = false
+    expect(registrations.find(({ config }) => config.name === 'conversation.hero.brand.mark')!.component({ size: 34, navigation })).toBeNull()
+
   })
 
   it('reuses the upstream preview-badge styling for the enterprise label', async () => {
@@ -166,7 +217,7 @@ describe('BISHENG client slot occupants', () => {
       'utf8'
     )
 
-    expect(source).toContain('children: [(0, react_jsx_runtime.jsx)("span", { children: t("hero.headline") })')
+    expect(source).toContain('children: renderSlot("conversation.hero.brand.title", {}, { fallback: [(0, react_jsx_runtime.jsx)("span", { children: t("hero.headline") })')
     expect(source).toContain('className: HeroShell_module_css_default.previewBadge')
     expect(source).toContain('children: t("hero.preview")')
     expect(source).toContain('background:var(--dsw-alias-state-business-tertiary)')
@@ -223,8 +274,14 @@ describe('BISHENG client slot occupants', () => {
 
     const logoRowStart = source.indexOf('className: SidebarRoot_module_css_default.logoRow')
     expect(logoRowStart).toBeGreaterThan(-1)
-    expect(source.slice(Math.max(0, logoRowStart - 120), logoRowStart)).toContain('!darwinDesktop &&')
+    expect(source.slice(Math.max(0, logoRowStart - 220), logoRowStart)).toContain('!darwinDesktop && !windowsTitlebar &&')
     expect(source).toContain('className: SidebarRoot_module_css_default.topStrip')
+    // Windows pins the toggle into the caption. Rendering it outside the logo
+    // row lets that empty 40px band go away without losing the button.
+    const windowsToggle = source.indexOf('windowsTitlebar && toggle')
+    expect(windowsToggle).toBeGreaterThan(-1)
+    expect(windowsToggle).toBeLessThan(logoRowStart)
+    expect(source.slice(windowsToggle, logoRowStart)).not.toContain('logoRow')
 
     const wideBrandStart = source.indexOf('children: [wide &&')
     const wideBrandEnd = source.indexOf('})(), toggle]', wideBrandStart)
